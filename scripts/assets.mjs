@@ -299,15 +299,19 @@ async function cmdVerify() {
   }
 
   if (state.assets.ok) {
-    const { files, bytes } = await measure(state.assets.dir)
+    const { files } = await measure(state.assets.dir)
     const expect = lock.assets
     if (expect) {
-      // @why 只做量级比对：重下素材会因为字典序变化带来个别文件增删，
-      //      严格相等会把正常情况也判成失败
-      const drift = Math.abs(files - expect.files) / Math.max(1, expect.files)
-      if (drift > 0.02) warnings.push(`素材文件数 ${files} 与 lock 记录 ${expect.files} 偏差 ${(drift * 100).toFixed(1)}%`)
-      if (expect.withSounds && !(await exists(path.join(state.assets.dir, 'sounds')))) {
-        warnings.push('lock 记录含音效，但 sounds/ 目录不存在（可能是 --lite 安装）')
+      // @why --lite 安装天生比 lock 少掉全部音效文件，那不是漂移，
+      //      分开判断否则每次都会刷一条假的 28% 偏差
+      const lite = expect.withSounds && !(await exists(path.join(state.assets.dir, 'sounds')))
+      if (lite) {
+        warnings.push('lock 记录含音效，但 sounds/ 目录不存在（--lite 安装，可忽略）')
+      } else {
+        // @why 只做量级比对：重下素材会因为字典序变化带来个别文件增删，
+        //      严格相等会把正常情况也判成失败
+        const drift = Math.abs(files - expect.files) / Math.max(1, expect.files)
+        if (drift > 0.02) warnings.push(`素材文件数 ${files} 与 lock 记录 ${expect.files} 偏差 ${(drift * 100).toFixed(1)}%`)
       }
     }
   } else {
@@ -321,7 +325,10 @@ async function cmdVerify() {
     const rawSounds = await readJson(path.join(state.assets.dir, 'sounds.json'))
     const a = derivedSounds.items?.length ?? 0
     const b = rawSounds.items?.length ?? 0
-    if (a !== b) warnings.push(`sounds.json 条目数 ${a} 与素材侧 ${b} 不一致，需重跑 extract-sound-names.py`)
+    // @constraint b 为 0 说明是 --lite 装（没音效文件就没有条目），此时无从比对
+    if (b > 0 && a !== b) {
+      warnings.push(`sounds.json 条目数 ${a} 与素材侧 ${b} 不一致，需重跑 extract-sound-names.py`)
+    }
   } catch {
     // 素材没下载时无从比对
   }
