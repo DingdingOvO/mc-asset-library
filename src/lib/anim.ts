@@ -12,6 +12,7 @@
 import type { PartPose, Rig } from './entityRig'
 import { initialPose } from './entityRig'
 import { applyKeyframes, type KeyDefinitions } from './keyframe'
+import { MC_BASE } from './mc'
 import { fetchWithRetry } from './net'
 
 interface AnimClass {
@@ -57,7 +58,7 @@ export function loadAnims(version: string): Promise<AnimFile> {
     // @constraint 带版本参数：转译规则改过几轮，浏览器缓存住旧的
     //              entityanims.json 会让新代码读到没有 attacks 的旧数据，
     //              表现就是"改了没生效"。
-    const response = await fetchWithRetry(`/mc/${version}/entityanims.json?v=10`)
+    const response = await fetchWithRetry(`${MC_BASE}/${version}/entityanims.json?v=10`)
     if (!response.ok) throw new Error(`实体动画加载失败：${response.status}`)
     return (await response.json()) as AnimFile
   })()

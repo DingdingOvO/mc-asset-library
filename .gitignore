@@ -18,3 +18,7 @@ __pycache__
 
 # 部署平台生成的启动记录，路径写死 /workspace，不属于项目源码
 .cloudstudio
+
+# Pages 本地组装产物
+/dist-site
+/_site

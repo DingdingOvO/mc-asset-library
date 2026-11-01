@@ -12,6 +12,7 @@
  *      它们本质上是「换一张贴图」或「给图层乘一个颜色」，
  *      不需要为每只生物写一套界面。
  */
+import { MC_BASE } from './mc'
 import { fetchWithRetry } from './net'
 import { buildRig, type EntityLayer, type Rig } from './entityRig'
 import type { EntityModel } from './entityMesh'
@@ -68,7 +69,7 @@ export function loadLayers(version: string): Promise<LayerFile> {
   const hit = cache.get(version)
   if (hit) return hit
   const task = (async () => {
-    const response = await fetchWithRetry(`/mc/${version}/entitylayers.json?v=1`)
+    const response = await fetchWithRetry(`${MC_BASE}/${version}/entitylayers.json?v=1`)
     if (!response.ok) throw new Error(`图层数据加载失败：${response.status}`)
     return (await response.json()) as LayerFile
   })()

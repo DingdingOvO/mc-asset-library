@@ -13,7 +13,7 @@ import {
 } from '@/lib/gltf'
 import { buildObj, buildStl, textureFile } from '@/lib/obj'
 import { makeZip, type ZipEntry } from '@/lib/zip'
-import { textureSrc } from '@/lib/mc'
+import { MC_BASE, textureSrc } from '@/lib/mc'
 import {
   BACKDROPS,
   FORMATS,
@@ -351,7 +351,7 @@ export function ExportPanel({
     run('源文件', async () => {
       const entries: ZipEntry[] = []
       for (const source of sources) {
-        const bytes = await fetchBytes(`/mc/${version}/${source.path}`)
+        const bytes = await fetchBytes(`${MC_BASE}/${version}/${source.path}`)
         if (bytes) entries.push({ name: source.path.replace(/\//g, '_'), data: bytes })
       }
       if (entries.length === 0) throw new Error('源文件获取失败')
@@ -373,7 +373,7 @@ export function ExportPanel({
       entries.push({ name: `${base}.glb`, data: packGlb(built) })
 
       for (const source of sources) {
-        const bytes = await fetchBytes(`/mc/${version}/${source.path}`)
+        const bytes = await fetchBytes(`${MC_BASE}/${version}/${source.path}`)
         if (bytes) entries.push({ name: `source/${source.path}`, data: bytes })
       }
       saveBlob(makeZip(entries), `${base}.zip`)

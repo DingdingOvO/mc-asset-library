@@ -1,4 +1,4 @@
-const BASE = '/mc'
+import { MC_BASE as BASE } from './mc'
 
 /** 纹理名与方块 id 的差异主要来自这类后缀，用于反查表未命中时兜底 */
 const AFFIXES = [

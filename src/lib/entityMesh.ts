@@ -5,6 +5,8 @@
  *      几何由 scripts/extract-entities.py 从反编译源码里挖出来，
  *      部件层级与枢轴一并保留，entityRig.ts 再按每帧的姿势展开。
  */
+import { MC_BASE } from './mc'
+
 export interface EntityBox {
   uv: [number, number]
   /** 几何范围：已经含 CubeDeformation 的膨胀量 */
@@ -69,7 +71,7 @@ export function loadEntityModels(version: string): Promise<EntityModelFile> {
     // @why 带格式版本：几何改为按 LayerDefinitions 的真实 bake 路径提取
     //      （含 scale / visibleFaces / 正确的 material 尺寸）。缓存了旧 JSON 的话
     //      UV 归一化尺寸是错的，整只生物会碎成几块。
-    const response = await fetch(`/mc/${version}/entitymodels.json?v=9`)
+    const response = await fetch(`${MC_BASE}/${version}/entitymodels.json?v=9`)
     if (!response.ok) throw new Error(`实体模型加载失败：${response.status}`)
     return (await response.json()) as EntityModelFile
   })()

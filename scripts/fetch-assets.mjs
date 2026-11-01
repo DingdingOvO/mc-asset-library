@@ -36,6 +36,24 @@ const withSounds = !flags.includes('--no-sounds')
 const cdnFlag = flags.find((f) => f.startsWith('--cdn='))
 const objectBase = cdnFlag ? cdnFlag.slice('--cdn='.length) : OBJECT_BASE
 
+/**
+ * 语言白名单。
+ * @why 144 种语言合计 87MB，比全部纹理加起来还大 40 倍。站点只用到简体中文与
+ *      英文，静态托管（GitHub Pages）根本放不下整份。指定后 jar 解包与对象库
+ *      补全都只留这几种。
+ */
+const langFlag = flags.find((f) => f.startsWith('--lang='))
+const allowLang = langFlag
+  ? new Set(langFlag.slice('--lang='.length).split(',').map((s) => s.trim()).filter(Boolean))
+  : null
+
+function langAllowed(name) {
+  if (!allowLang) return true
+  const match = /(?:^|\/)lang\/([^/]+)\.json$/.exec(name)
+  if (!match) return true
+  return allowLang.has(match[1])
+}
+
 const CONCURRENCY = 12
 
 /** jar 内保留的顶层目录，class 文件与混淆映射全部丢弃 */
@@ -1739,7 +1757,7 @@ async function main() {
     written = await unzipJar(
       jarPath,
       outDir,
-      (name) => KEEP_PREFIXES.some((p) => name.startsWith(p)),
+      (name) => KEEP_PREFIXES.some((p) => name.startsWith(p)) && langAllowed(name),
       'assets/minecraft/',
     )
     log(`  解出 ${written.length} 个文件`)
@@ -1758,6 +1776,7 @@ async function main() {
     if (!key.startsWith('minecraft/')) continue // icons / realms 由启动器使用，站点不需要
     if (jarSet.has(key)) continue
     if (!withSounds && key.startsWith('minecraft/sounds/')) continue
+    if (!langAllowed(key)) continue
     const dest = path.join(outDir, key.replace(/^minecraft\//, ''))
     if (await exists(dest)) continue
     missing.push({ key, hash: value.hash, size: value.size })

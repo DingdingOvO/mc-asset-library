@@ -1,6 +1,5 @@
+import { MC_BASE as BASE } from './mc'
 import { fetchWithRetry } from './net'
-
-const BASE = '/mc'
 
 export interface RegistryEntry {
   id: string

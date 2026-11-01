@@ -1,6 +1,18 @@
 import { fetchWithRetry } from './net'
 
-const BASE = '/mc'
+/**
+ * 素材根地址。
+ *
+ * @why 站点可能被挂在子路径下（GitHub Pages 是 `/<repo>/`），素材目录跟着站点走；
+ *      也可能整包丢到外部 CDN 上，那时不该再带子路径。两种情况只能靠构建期变量区分。
+ * @constraint 结尾不带斜杠，调用处统一用 `${MC_BASE}/<版本>/...` 拼接。
+ */
+export const MC_BASE = (import.meta.env.VITE_ASSET_BASE ?? `${__SITE_BASE__}mc`).replace(
+  /\/+$/,
+  '',
+)
+
+const BASE = MC_BASE
 
 export interface McGroup {
   id: string

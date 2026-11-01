@@ -106,6 +106,30 @@ pnpm run assets lock
 
 提取脚本读的是 Java 源码，所以第 2 步是唯一无法自动化的环节——这也是那 7 个 JSON 必须入库的原因。
 
+## 部署到 GitHub Pages
+
+仓库自带 `.github/workflows/pages.yml`，push 到 `main` 就自动构建并发布。首次需要在 **Settings → Pages → Source** 选 **GitHub Actions**。
+
+流程里有三个针对 Pages 的处理：
+
+| 问题 | 处理 |
+|---|---|
+| 站点挂在 `/<repo>/` 子路径下 | 构建时注入 `VITE_BASE`，路由 basename 与素材地址都带前缀 |
+| 深链接没有 rewrite，回 404 | 构建产出 `404.html`（内容同 `index.html`），Pages 会把未知路径交回 SPA |
+| 素材 460MB，站点上限 1GB | CI 里裁成 `--no-sounds --lang=zh_cn,en_us`，约 7MB |
+
+> **限制**：GitHub Pages 的免费账号只允许**公开仓库**使用 Pages。私有仓库要发布 Pages 需要 Pro。如果你的仓库还是私有的，先转公开，或改为部署到自己的服务器（见下）。
+
+本地预览 Pages 效果（子路径 + 404 回退都能验证）：
+
+```bash
+pnpm run pages:build      # 按 /<当前目录名>/ 前缀构建，产物在 dist-site/
+cd dist-site && python3 -m http.server 8080
+# 打开 http://localhost:8080/<目录名>/
+```
+
+素材想改用外部 CDN（比如对象存储）而不跟站点一起发时，构建时设 `VITE_ASSET_BASE=https://cdn.example.com/mc`，前端所有素材请求会走它，`VITE_BASE` 只管站点路由。
+
 ## 导出
 
 详情页可以把当前模型导出为 MP4 / GIF / WebP / APNG / PNG 序列 / glTF / GLB / OBJ / ZIP。帧序列与 glTF 都在主线程算，导出大尺寸时页面会短暂卡住，属预期。

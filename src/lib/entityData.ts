@@ -6,6 +6,7 @@
  *      EntityRenderers.register(EntityTypes.ZOMBIE, ZombieRenderer::new) 里，
  *      由 scripts/extract-renderers.py 反编译挖出来，这里只做查表。
  */
+import { MC_BASE } from './mc'
 import { fetchWithRetry } from './net'
 
 export interface EntityRenderInfo {
@@ -36,7 +37,7 @@ export function loadRenderers(version: string): Promise<RendererFile> {
   const hit = cache.get(version)
   if (hit) return hit
   const task = (async () => {
-    const response = await fetchWithRetry(`/mc/${version}/entityrenderers.json?v=2`)
+    const response = await fetchWithRetry(`${MC_BASE}/${version}/entityrenderers.json?v=2`)
     if (!response.ok) throw new Error(`实体渲染表加载失败：${response.status}`)
     return (await response.json()) as RendererFile
   })()

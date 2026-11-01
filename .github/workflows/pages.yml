@@ -1,0 +1,65 @@
+name: 部署到 GitHub Pages
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# @why 连续 push 时只保留最后一次部署，避免旧构建后完成把新版本盖回去
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # @why 素材 460MB 里 456MB 是音效和多余语言，Pages 站点上限 1GB 且每次部署
+      #      都要整体上传。裁到「无音效 + 中英双语」后约 7MB，构建时间也从分钟级降到秒级。
+      - name: 缓存素材
+        uses: actions/cache@v4
+        with:
+          path: mc-assets
+          key: mc-assets-${{ hashFiles('mc-assets.lock.json') }}
+
+      - name: 准备素材
+        run: node scripts/fetch-assets.mjs 26.3 --no-sounds --lang=zh_cn,en_us
+
+      - name: 构建
+        run: pnpm build
+        env:
+          # @constraint Pages 项目站点挂在 /<repo>/ 下，路由与素材地址都要带这个前缀
+          VITE_BASE: /${{ github.event.repository.name }}/
+
+      - name: 组装站点
+        run: node scripts/assets.mjs pack --out=_site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

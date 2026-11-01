@@ -20,7 +20,7 @@
 import { spawn } from 'node:child_process'
 import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
-import { readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
+import { copyFile, cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
@@ -184,10 +184,13 @@ async function runFetch({ lite, cdn }) {
   const fetchArgs = [path.join(ROOT, 'scripts', 'fetch-assets.mjs')]
   if (lite) fetchArgs.push('--no-sounds')
   if (cdn) fetchArgs.push(`--cdn=${cdn}`)
+  const lang = opt('lang')
+  if (lang) fetchArgs.push(`--lang=${lang}`)
   const version = opt('version')
   if (version) fetchArgs.push(version)
 
-  log(`开始下载素材${lite ? '（跳过音效）' : '（含音效，约 500MB）'}…`)
+  const scope = [lite ? '跳过音效' : '含音效', lang ? `只留 ${lang}` : '全部语言'].join('，')
+  log(`开始下载素材（${scope}）…`)
   await new Promise((resolve, reject) => {
     const child = spawn(process.execPath, fetchArgs, { cwd: ROOT, stdio: 'inherit' })
     child.on('error', reject)
@@ -413,6 +416,47 @@ async function cmdStats() {
   console.log(`  mc-derived/${version}  不可重建，入库中：${human(derived.bytes)} / ${derived.files} 个文件\n`)
 }
 
+async function cmdPack() {
+  const version = await currentVersion()
+  if (!version) {
+    fail('还没有素材，先跑 pnpm run setup -- --lite --lang=zh_cn,en_us')
+    return
+  }
+
+  const dist = path.join(ROOT, 'dist')
+  if (!(await exists(path.join(dist, 'index.html')))) {
+    fail('dist/index.html 不存在，先跑 pnpm build')
+    return
+  }
+
+  const outDir = path.resolve(opt('out') ?? path.join(ROOT, 'dist-site'))
+  await rm(outDir, { recursive: true, force: true })
+  await cp(dist, outDir, { recursive: true })
+
+  // @constraint 顺序不能反：derived 里的 sounds.json 带官方字幕中文名，
+  //      必须在 mc-assets 之后覆盖，否则静态站上音效只剩文件名
+  const mcDir = path.join(outDir, 'mc', version)
+  const assetDir = path.join(ASSETS_ROOT, version)
+  const derivedDir = path.join(DERIVED_ROOT, version)
+  if (await exists(assetDir)) await cp(assetDir, mcDir, { recursive: true })
+  // @constraint 版本清单在 mc-assets 根层，不在版本目录内；漏了它首页会直接
+  //      "素材索引加载失败"，而且只看目录结构很难发现
+  const versionsFile = path.join(ASSETS_ROOT, 'versions.json')
+  if (await exists(versionsFile)) await copyFile(versionsFile, path.join(outDir, 'mc', 'versions.json'))
+  await mkdir(mcDir, { recursive: true })
+  await cp(derivedDir, mcDir, { recursive: true, force: true })
+
+  // @why 构建插件已经生成过；这里兜底，避免旧 dist 没有 404.html 时静态托管深链接直接断
+  const notFound = path.join(outDir, '404.html')
+  if (!(await exists(notFound))) await copyFile(path.join(outDir, 'index.html'), notFound)
+
+  const { files, bytes } = await measure(outDir)
+  log(`已生成 ${path.relative(ROOT, outDir)}：${files} 个文件 / ${human(bytes)}`)
+  if (bytes > 900 * 1024 * 1024) {
+    fail('超过 900MB，GitHub Pages 站点上限是 1GB，请裁剪（--no-sounds / --lang）')
+  }
+}
+
 async function cmdClean() {
   if (!flag('yes')) {
     fail('这会删除 mc-assets（可重新下载，但要花流量和时间）。确认请加 --yes')
@@ -424,6 +468,7 @@ async function cmdClean() {
 
 const commands = {
   sync: cmdSync,
+  pack: cmdPack,
   ensure: cmdEnsure,
   verify: cmdVerify,
   lock: cmdLock,
