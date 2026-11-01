@@ -22,10 +22,10 @@ pnpm run dev
 pnpm run setup -- --cdn=https://bmclapi2.bangbang93.com/assets
 ```
 
-只关心图片、不需要 4961 个音效（省下 360MB）：
+只关心图片、不需要 4961 个音效：
 
 ```bash
-pnpm run setup:lite
+pnpm run setup:lite   # 下载约 130MB，落盘 145MB；完整版再多半 GB 音效
 ```
 
 ## 目录
