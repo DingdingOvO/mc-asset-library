@@ -1,0 +1,37 @@
+{
+  "name": "toolbox",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "predev": "node scripts/assets.mjs ensure --strict",
+    "dev": "vite",
+    "prebuild": "node scripts/assets.mjs ensure",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview",
+    "start": "node scripts/serve.mjs",
+    "setup": "node scripts/assets.mjs sync",
+    "setup:lite": "node scripts/assets.mjs sync --lite",
+    "assets": "node scripts/assets.mjs",
+    "verify": "node scripts/assets.mjs verify",
+    "typecheck": "tsc -b"
+  },
+  "dependencies": {
+    "gifenc": "^1.0.3",
+    "mp4-muxer": "^5.2.2",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "react-router-dom": "^7.18.4"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.5",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@types/yauzl": "^3.4.0",
+    "@vitejs/plugin-react": "^6.1.2",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.5",
+    "vite-plugin-singlefile": "^2.3.4",
+    "yauzl": "^3.4.0"
+  }
+}

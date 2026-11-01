@@ -1,0 +1,20 @@
+node_modules
+dist
+dist-ssr
+*.local
+.DS_Store
+.vite
+*.tsbuildinfo
+.cache
+
+# 素材约 500MB / 1.7 万文件，全部可由 scripts/fetch-assets.mjs 从 Mojang 官方端点
+# 重建（pnpm run setup）。不可再生的 7 个派生 JSON 在 mc-derived/，那个目录必须入库。
+/mc-assets
+
+# 本地导出示例与诊断截图，不属于源码
+/samples
+
+__pycache__
+
+# 部署平台生成的启动记录，路径写死 /workspace，不属于项目源码
+.cloudstudio

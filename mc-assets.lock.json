@@ -1,0 +1,39 @@
+{
+  "version": "26.3",
+  "generatedAt": "2026-11-01T14:31:22.746Z",
+  "assets": {
+    "files": 17269,
+    "bytes": 482360080,
+    "withSounds": true
+  },
+  "derived": {
+    "entitymodels.json": {
+      "bytes": 588959,
+      "sha256": "c5e836042dfdec1c6efcf0c89acd80b64bbd2d7e5a85b332d4158a95a021ad90"
+    },
+    "entityanims.json": {
+      "bytes": 158039,
+      "sha256": "69e8ff1738e52d1baade197be04207a28af1d03b9acb33fdaff1a536a91f7cfb"
+    },
+    "entitylayers.json": {
+      "bytes": 19833,
+      "sha256": "466343a4bc9f8bebe65a5a99ab2a0dcc7c19c9d8469a778130b1c9ded35d48ba"
+    },
+    "entityrenderers.json": {
+      "bytes": 45168,
+      "sha256": "9b9f19b5514a6bb9ee668516141a62afca3a802b0bbb2ef58a98634828c110f4"
+    },
+    "particledata.json": {
+      "bytes": 20158,
+      "sha256": "2972765f2a11e2fab19d2d5f29310ab970d488d869c2b6b720ea1e69dc976795"
+    },
+    "creativetabs.json": {
+      "bytes": 29338,
+      "sha256": "f50e185e88bc4c353bfd77ab79094f803bb4a74ce0346070b19f02734d788bbe"
+    },
+    "sounds.json": {
+      "bytes": 515640,
+      "sha256": "35d7aa8d4855a25a8581803290348dfec012b2845009e56f3504bd64f1ce91c8"
+    }
+  }
+}

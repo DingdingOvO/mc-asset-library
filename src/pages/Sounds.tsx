@@ -1,0 +1,183 @@
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Link, useParams, useSearchParams } from 'react-router-dom'
+import { PauseIcon, PlayIcon } from '@/components/icons'
+import { SearchBox } from '@/components/SearchBox'
+import { formatBytes, loadSounds, soundSrc } from '@/lib/mc'
+import { useAsync } from '@/lib/useAsync'
+import { useLibrary } from '@/lib/useLibrary'
+import { usePaged } from '@/lib/usePaged'
+
+const GROUP_LABELS: Record<string, string> = {
+  ambient: '环境',
+  block: '方块',
+  mob: '生物',
+  item: '物品',
+  entity: '实体',
+  music: '音乐',
+  step: '脚步',
+  random: '随机',
+  dig: '破坏',
+  liquid: '液体',
+  note: '音符盒',
+  records: '唱片',
+  enchant: '附魔',
+  ui: '界面',
+  event: '事件',
+  fireworks: '烟花',
+  damage: '伤害',
+  minecart: '矿车',
+  portal: '传送门',
+  fire: '火焰',
+  tile: '旧版方块',
+  misc: '杂项',
+}
+
+export default function Sounds() {
+  const { version, loading, error } = useLibrary()
+
+  if (error) return <p className="notice notice--error container">版本清单加载失败：{error.message}</p>
+  if (loading || !version) return <p className="empty">正在读取音效索引…</p>
+
+  return <SoundBrowser version={version} />
+}
+
+function SoundBrowser({ version }: { version: string }) {
+  const { group = 'all' } = useParams()
+  const { data, loading, error } = useAsync(`sounds:${version}`, () => loadSounds(version))
+  const [params, setParams] = useSearchParams()
+
+  const [playing, setPlaying] = useState<string | null>(null)
+  const audioRef = useRef<HTMLAudioElement | null>(null)
+
+  const query = params.get('q') ?? ''
+  const items = useMemo(
+    // @why 自然排序，避免 cave10 排在 cave2 前面
+    () => [...(data?.items ?? [])].sort((a, b) => a.p.localeCompare(b.p, undefined, { numeric: true })),
+    [data],
+  )
+
+  const groups = useMemo(() => {
+    const counter = new Map<string, number>()
+    for (const item of items) counter.set(item.g, (counter.get(item.g) ?? 0) + 1)
+    return [...counter.entries()]
+      .map(([id, count]) => ({ id, count, label: GROUP_LABELS[id] ?? id }))
+      .sort((a, b) => b.count - a.count)
+  }, [items])
+
+  const filtered = useMemo(() => {
+    const scoped = group === 'all' ? items : items.filter((item) => item.g === group)
+    const keyword = query.trim().toLowerCase()
+    return keyword ? scoped.filter((item) => item.p.toLowerCase().includes(keyword)) : scoped
+  }, [items, group, query])
+
+  const { visible, sentinelRef, total, shown } = usePaged(filtered, 200)
+
+  useEffect(() => {
+    return () => {
+      audioRef.current?.pause()
+    }
+  }, [])
+
+  const toggle = (id: string) => {
+    const audio = audioRef.current ?? new Audio()
+    audioRef.current = audio
+
+    if (playing === id) {
+      audio.pause()
+      setPlaying(null)
+      return
+    }
+
+    audio.src = soundSrc(version, id)
+    audio.onended = () => setPlaying(null)
+    void audio
+      .play()
+      .then(() => setPlaying(id))
+      .catch(() => setPlaying(null))
+  }
+
+  const activeLabel = group === 'all' ? '全部音效' : (GROUP_LABELS[group] ?? group)
+
+  const updateQuery = (value: string) => {
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (value) next.set('q', value)
+        else next.delete('q')
+        return next
+      },
+      { replace: true },
+    )
+  }
+
+  const withQuery = (path: string) => {
+    const suffix = params.toString()
+    return suffix ? `${path}?${suffix}` : path
+  }
+
+  return (
+    <div className="container">
+      <div className="page-head">
+        <Link to="/" className="text-link">
+          ← 返回首页
+        </Link>
+        <h1>{activeLabel}</h1>
+        <p>
+          {total} 个音效
+          {shown < total && ` · 已显示 ${shown}`}
+        </p>
+      </div>
+
+      <div className="browse-bar">
+        <div className="chips">
+          <Link className="chip" to={withQuery('/sounds')} aria-pressed={group === 'all'}>
+            全部
+            <span className="chip__count">{items.length}</span>
+          </Link>
+          {groups.map((item) => (
+            <Link
+              key={item.id}
+              className="chip"
+              to={withQuery(`/sounds/${item.id}`)}
+              aria-pressed={group === item.id}
+            >
+              {item.label}
+              <span className="chip__count">{item.count}</span>
+            </Link>
+          ))}
+        </div>
+        <SearchBox
+          primary
+          value={query}
+          onChange={updateQuery}
+          placeholder={`在 ${activeLabel} 中搜索…`}
+        />
+      </div>
+
+      {error && <p className="notice notice--error">索引加载失败：{error.message}</p>}
+      {loading && <p className="empty">正在加载音效…</p>}
+      {!loading && filtered.length === 0 && <p className="empty">没有匹配「{query}」的音效</p>}
+
+      <div className="sound-list">
+        {visible.map((sound) => (
+          <button
+            key={sound.p}
+            type="button"
+            className="sound-row"
+            aria-pressed={playing === sound.p}
+            onClick={() => toggle(sound.p)}
+          >
+            <span className="sound-row__play">
+              {playing === sound.p ? <PauseIcon /> : <PlayIcon />}
+            </span>
+            <span className="sound-row__name">{sound.p}</span>
+            <span className="sound-row__group">{GROUP_LABELS[sound.g] ?? sound.g}</span>
+            <span className="sound-row__size">{formatBytes(sound.k)}</span>
+          </button>
+        ))}
+      </div>
+
+      <div ref={sentinelRef} className="sentinel" />
+    </div>
+  )
+}
