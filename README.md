@@ -1,5 +1,7 @@
 # MC 素材库
 
+**[dingdingovo.github.io/mc-asset-library](https://dingdingovo.github.io/mc-asset-library/)** — 直接打开就能用，不需要本地跑。
+
 在浏览器里翻阅 Minecraft 的全部素材：方块、物品、生物模型、粒子、界面图、音效。
 
 三件事和常见的「贴图预览站」不一样：
