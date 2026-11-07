@@ -1553,8 +1553,6 @@ def match_texture(key, want=None):
             # 非等比（贴图右侧/下方留白）：UV 仍按模型声明尺寸归一化
             return path, 1, None
         return path, 1, size
-    if os.environ.get('TEX_DEBUG'):
-        print(f'  [tex] {key} want={want} 候选={texture_candidates(key)}', file=sys.stderr)
     return None, 1, None
 
 
