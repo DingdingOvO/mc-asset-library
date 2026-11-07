@@ -1,7 +1,6 @@
 import type { DisplayTransform } from './scene'
+import { MC_BASE as BASE } from './mc'
 import { fetchWithRetry } from './net'
-
-const BASE = '/mc'
 
 export type Dir = [number, number, number]
 
