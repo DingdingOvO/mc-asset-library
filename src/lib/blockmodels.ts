@@ -112,7 +112,15 @@ export function loadBakeShard(
       )
     }
     return data
-  })()
+  })().catch((error: unknown) => {
+    /**
+     * @why 失败的分片必须从缓存里摘掉。调用方按「没取到就下次重试」处理，
+     *      但缓存里留着 rejected Promise，重试就会原样拿到同一个失败结果，
+     *      卡片从此永久停在占位。
+     */
+    shardCache.delete(key)
+    throw error
+  })
 
   shardCache.set(key, task)
   return task

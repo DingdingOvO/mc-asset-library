@@ -44,6 +44,22 @@ function BlockBrowser({ version }: { version: string }) {
   const loadingShards = useRef(new Set<number>())
   const [revision, setRevision] = useState(0)
 
+  /**
+   * 组件是否还挂载。
+   * @why 不能用 effect 的清理标志判断：分片回来前，注册表/语言数据到达会触发
+   *      重渲染，取数据的 effect 随之被清理重建。用清理标志就会把已经到手的
+   *      数据当垃圾丢掉，而 doneShards 没标记、revision 没自增，依赖也不再变化
+   *      —— 卡片永远停在占位（Pages 上分片要 1.3 秒，必现）。
+   *      数据落地与是否挂载无关，只有 setState 需要在意。
+   */
+  const mounted = useRef(true)
+  useEffect(
+    () => () => {
+      mounted.current = false
+    },
+    [],
+  )
+
   // 换版本等于换一整套数据，旧分片的 key 全部失效
   useEffect(() => {
     facesRef.current = {}
@@ -136,12 +152,10 @@ function BlockBrowser({ version }: { version: string }) {
     }
     if (want.length === 0) return
 
-    let alive = true
     void Promise.all(
       want.map(async (shard) => {
         try {
           const part = await loadBakeShard(version, 'blocks', shard)
-          if (!alive) return
           Object.assign(facesRef.current, part)
           doneShards.current.add(shard)
         } catch {
@@ -151,11 +165,8 @@ function BlockBrowser({ version }: { version: string }) {
         }
       }),
     ).then(() => {
-      if (alive) setRevision((value) => value + 1)
+      if (mounted.current) setRevision((value) => value + 1)
     })
-    return () => {
-      alive = false
-    }
   }, [visible, models.data, version])
 
   /**

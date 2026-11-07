@@ -44,6 +44,21 @@ function ItemBrowser({ version, group }: { version: string; group: string }) {
   const loadingShards = useRef(new Set<number>())
   const [revision, setRevision] = useState(0)
 
+  /**
+   * 组件是否还挂载。
+   * @why 不能用取数据 effect 的清理标志：分片回来前，注册表/语言数据到达会触发
+   *      重渲染，effect 被清理重建，清理标志随之变假，已经到手的面数据会被当成
+   *      垃圾丢掉——doneShards 没标记、revision 没自增，卡片永远停在占位。
+   *      数据落地与是否挂载无关，只有 setState 需要在意。
+   */
+  const mounted = useRef(true)
+  useEffect(
+    () => () => {
+      mounted.current = false
+    },
+    [],
+  )
+
   useEffect(() => {
     facesRef.current = {}
     doneShards.current = new Set()
@@ -117,12 +132,10 @@ function ItemBrowser({ version, group }: { version: string; group: string }) {
     }
     if (want.length === 0) return
 
-    let alive = true
     void Promise.all(
       want.map(async (shard) => {
         try {
           const part = await loadBakeShard(version, 'items', shard)
-          if (!alive) return
           Object.assign(facesRef.current, part)
           doneShards.current.add(shard)
         } catch {
@@ -132,11 +145,8 @@ function ItemBrowser({ version, group }: { version: string; group: string }) {
         }
       }),
     ).then(() => {
-      if (alive) setRevision((value) => value + 1)
+      if (mounted.current) setRevision((value) => value + 1)
     })
-    return () => {
-      alive = false
-    }
   }, [visible, models.data, version, shardOf])
 
   /** 点开了还没取回面数据的物品（可见判定与点击之间有几帧的窗口） */
