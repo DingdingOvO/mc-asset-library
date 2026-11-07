@@ -462,8 +462,8 @@ VILLAGER_AXES = (
 )
 
 
-def villager_variants():
-    """枚举 villager/<path> 下的贴图，返回 (layers, axes)"""
+def villager_variants(prefix='villager'):
+    """枚举 <prefix>/<path> 下的贴图，返回 (layers, axes)"""
     lang = {}
     lang_path = os.path.join(ROOT, 'mc-assets', VERSION, 'lang', 'zh_cn.json')
     if os.path.exists(lang_path):
@@ -472,7 +472,7 @@ def villager_variants():
     layers = []
     axes = []
     for path, zh, lang_prefix, default in VILLAGER_AXES:
-        folder = os.path.join(TEXTURES, 'villager', path)
+        folder = os.path.join(TEXTURES, prefix, path)
         if not os.path.isdir(folder):
             continue
         names = sorted(n[:-4] for n in os.listdir(folder)
@@ -485,9 +485,9 @@ def villager_variants():
             #      直接拼会漏掉这一项，下拉框里冒出个英文 snow
             zh_name = lang.get(lang_prefix + name) or VILLAGER_TYPE_ZH.get(name) or name
             opts.append({
-                'k': f'entity/villager/{path}/{name}',
+                'k': f'entity/{prefix}/{path}/{name}',
                 'zh': zh_name,
-                't': f'entity/villager/{path}/{name}',
+                't': f'entity/{prefix}/{path}/{name}',
             })
         # 图层类的构造参数靠 path 区分，这里用 # 后缀拆成两条独立图层
         cls = 'VillagerProfessionLayer#' + path
@@ -500,13 +500,17 @@ def villager_variants():
 
 
 def apply_villager_axes(layers_out, axes_out, table):
-    layers, axes = villager_variants()
-    if not layers:
-        return
     # @constraint 不能用「已存在于 layers/axes」当条件：村民本来就是个没有任何
     #      变体的普通生物，两个表里都没有它，等于永远加不上职业轴。
-    for entity in ('villager', 'villager_baby'):
-        if entity == 'villager' and entity not in table:
+    #      僵尸村民的贴图目录是 zombie_villager/，图层类却是同一个。
+    for entity, prefix in (
+        ('villager', 'villager'),
+        ('villager_baby', 'villager'),
+        ('zombie_villager', 'zombie_villager'),
+        ('zombie_villager_baby', 'zombie_villager'),
+    ):
+        layers, axes = villager_variants(prefix)
+        if not layers:
             continue
         merged = list(layers_out.get(entity, []))
         for item in layers:
