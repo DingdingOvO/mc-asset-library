@@ -158,7 +158,7 @@ export function motionOf(
   const initial = kind === 'walk' || kind === 'idle' ? 1 : kind === 'static' ? 0 : preset.stops[1]?.value ?? 0
   let cycle: number | null = null
   if (poser && kind !== 'static') {
-    cycle = measureCycle(poser, initial) ?? (kind === 'walk' ? walkCycle(initial) : null)
+    cycle = measureCycle(poser, initial) ?? (kind === 'walk' ? walkCycle(initial, false) : null)
   }
   return { kind, label: preset.label, stops: preset.stops, initial, cycle }
 }

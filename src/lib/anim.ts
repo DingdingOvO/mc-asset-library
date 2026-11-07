@@ -11,6 +11,7 @@
  */
 import type { PartPose, Rig } from './entityRig'
 import { initialPose } from './entityRig'
+import { flapSample, squishSample, tentacleSample, walkCycle, walkSample } from './entityState'
 import { applyKeyframes, type KeyDefinitions } from './keyframe'
 import { MC_BASE } from './mc'
 import { fetchWithRetry } from './net'
@@ -109,6 +110,19 @@ const MC_IMPL = {
     let diff = end - start
     while (diff >= 180) diff -= 360
     while (diff < -180) diff += 360
+    return start + diff * delta
+  },
+  /**
+   * Mth.rotLerpRad：弧度版 rotLerp，环绕周期是 2π 而不是 360。
+   *
+   * @constraint 漏掉它会静默出错而不是报错：MC 的 Proxy 对未知函数一律返回
+   *      `() => 0`，于是"每帧把角度平滑转向目标"变成"每帧赋 0"——
+   *      用到它的 5 处部件不是不动，而是被按死在零位。
+   */
+  rotLerpRad: (delta: number, start: number, end: number) => {
+    let diff = end - start
+    while (diff < -Math.PI) diff += Math.PI * 2
+    while (diff >= Math.PI) diff -= Math.PI * 2
     return start + diff * delta
   },
   wrapDegrees: (deg: number) => {
@@ -375,24 +389,13 @@ export interface Poser {
 }
 
 /**
- * 行走相位每秒推进多少（limbSwing 的累积速率）。
- * @constraint 不写成常量而跟着 speed 变：站立时相位空转无所谓（幅度为 0），
- *      但奔跑时如果只是加大幅度而不是加快步频，腿会劈到穿模，看起来像在抽搐。
- */
-function swingRate(speed: number): number {
-  return 7 * (0.55 + 0.45 * Math.min(1.6, speed))
-}
-
-/**
  * 一个完整行走周期的秒数（左右腿各迈一次）。
  *
  * @why 导出循环动图时，播放时长必须是它的整数倍，否则最后一帧接回第一帧会跳相位——
- *      用户看到的就是"首尾拼不上"。四足和人形的腿部摆动都是 cos(limbSwing * 0.6662)，
- *      所以相位转 2π 就是一个周期；这个 0.6662 是游戏里写死的。
+ *      用户看到的就是"首尾拼不上"。相位公式在 entityState 里，这里只做转发，
+ *      避免周期和实际相位算法各写一份、改一处漏一处。
  */
-export function walkCycle(speed: number): number {
-  return (Math.PI * 2) / (swingRate(speed) * 0.6662)
-}
+export { walkCycle }
 
 /**
  * 给一个模型建立姿势生成器。
@@ -408,6 +411,20 @@ export function createPoser(modelClass: string | null, rig: Rig, anim: AnimFile 
   }
 
   const runner = modelClass && anim ? compile(modelClass, anim) : null
+
+  /**
+   * 史莱姆的变形完全不在模型里。
+   *
+   * @why SlimeModel 连 setupAnim 都没有，整只生物的伸缩由
+   *      AbstractCubeMobRenderer.applySizeAndSquish 直接对 poseStack 缩放，
+   *      model 只提供一个 8×8×8 的方块。前端以前只把 squish 塞进 state，
+   *      没有任何一处消费它，结果史莱姆点开是一块永不变化的绿方块。
+   *
+   * @constraint 缩放必须落在根部件上才是"整体"，落到 cube 上会连贴图坐标一起压。
+   */
+  const squishRoots = /^(Slime|MagmaCube)Model$/.test(modelClass ?? '')
+    ? rig.parts.filter((part) => part.parent === null).map((part) => part.name)
+    : []
 
   // 字段名（camelCase）→ 部件名（snake_case）的别名，动画代码里用的是 Java 字段名
   const aliases = new Map<string, string>()
@@ -553,26 +570,27 @@ export function createPoser(modelClass: string | null, rig: Rig, anim: AnimFile 
         state.xRot = input.pitch
         state.yRot = input.yaw
         state.ageInTicks = input.t * 20
-        state.walkAnimationPos = input.t * swingRate(input.speed)
         /**
-         * @constraint 系数 0.42：人形/四足的步幅系数写死是 1.4 弧度，乘 1 就是
-         *      ±80°，腿会劈到穿模、四足动物的身子像趴在地上。游戏里牛走路
-         *      约 ±34°，对应 0.42。上限 1 是硬约束——超过腿会互相穿过。
+         * @constraint 行走量必须走 entityState 的闭式解，不能再用斜率常数。
+         *      游戏里 position 是 speed 的逐 tick 累加（WalkAnimationState.update），
+         *      speed 由位移 ×4 平滑而来，玩家稳定态是 0.864 而不是 1。
+         *      以前写死 `t * 7` 让相位慢了 2.5 倍、`0.42 × 输入` 让摆幅永远压不满，
+         *      两个错互相掩盖，表现成"走起来像慢动作、幅度又发僵"。
          */
-        state.walkAnimationSpeed = Math.min(1, 0.42 * input.speed)
+        const walk = walkSample(input.t, input.speed, Boolean(stateValues.isBaby))
+        state.walkAnimationPos = walk.pos
+        state.walkAnimationSpeed = walk.speed
         state.flap = input.t * 6
         state.flapSpeed = input.speed > 0.05 ? 1 : 0.35
-        // @why flapTime 是"累计振翅时间"：游戏里每 tick 加一点，模型再乘自己的
-        //      频率系数（幻翼 7.448、末影龙 2π）。这里按每 tick 0.1 折算。
-        state.flapTime = input.t * 2 * (0.5 + 0.5 * Math.min(1.6, input.speed))
+        state.flapTime = flapSample(input.t, input.speed)
         /**
          * @constraint 两条桨相位差半个周期：同相的话左右桨会像鸭蹼一样一起划，
          *      看起来是船在抖而不是在前进。
          */
         state.rowingTimeLeft = input.t * 7 * input.speed
         state.rowingTimeRight = input.t * 7 * input.speed + Math.PI * 0.5
-        state.tentacleAngle = 0.3 + 0.25 * Math.sin(input.t * 2.2)
-        state.squish = 0.35 + 0.35 * Math.sin(input.t * 3)
+        state.tentacleAngle = tentacleSample(input.t)
+        state.squish = squishSample(input.t)
         KF.poses = poses
         KF.defs = anim?.defs ?? null
         /**
@@ -581,6 +599,25 @@ export function createPoser(modelClass: string | null, rig: Rig, anim: AnimFile 
          */
         KF.time = input.t * (0.35 + 0.65 * Math.min(1.6, input.speed))
         runner(bag as unknown as Record<string, PartPose>, state)
+        if (squishRoots.length > 0) {
+          /**
+           * AbstractCubeMobRenderer.applySizeAndSquish：
+           *   ss = squish / (size * 0.5 + 1);  w = 1 / (ss + 1)
+           *   scale(w * size, 1/w * size, w * size)
+           * 模型几何就是 size = 1 那一档（8×8×8 的方块），所以 size 固定取 1。
+           */
+          const ss = Number(stateValues.squish) / 1.5
+          const w = 1 / (1 + ss)
+          if (Number.isFinite(w) && w > 0) {
+            for (const name of squishRoots) {
+              const pose = poses.get(name)
+              if (!pose) continue
+              pose.xScale *= w
+              pose.yScale *= 1 / w
+              pose.zScale *= w
+            }
+          }
+        }
         // 黑洞值被赋进姿势时可能是对象或 NaN，清洗掉，否则整个矩阵变成 NaN
         for (const item of parts) {
           const pose = item.pose
