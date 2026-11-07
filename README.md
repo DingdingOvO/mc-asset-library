@@ -10,6 +10,7 @@
 - **生物模型不是猜的**。几何、UV、动画、渲染图层全部由 `scripts/extract-*.py` 从反编译的 Java 源码里提取，字段与 `ModelPart$Cube`、`setupAnim`、`addLayer` 一一对应。263 个烘焙模型全部有贴图，`for` 循环里建的部件（烈焰人的十二根棒子、末影龙的脖子）、静态数组常量（蠹虫的分段尺寸）、返回数值的静态方法（守护者的十二根尖刺）都按源码求值，不靠猜。
 - **动作量也是**。步态不由"每秒转多少弧度"这类估算驱动，而是照 `LivingEntity.updateWalkAnimation` 实现：速度由位移 ×4 平滑而来、上限 1，位置是速度的逐 tick 累加，所以腿的相位与步幅天然一致（玩家稳定态是 0.864 而不是 1）。史莱姆的伸缩走 `AbstractCubeMob.tick` 的落地/离地双状态、鱿鱼触手走 `|sin(movement)|·π/4`，都是原样搬过来的。
 - **状态能选**。品种、花纹、染色、职业都是下拉框：猫 11 种毛色、狼 27 张、马 7 色 × 5 花纹、村民 7 生态型 × 15 职业（僵尸村民同样）。
+- **界面是可编辑的，不是贴图墙**。「界面」页是一张工作区：左边点一个容器放进来，右边把物品点进格子，最后整体导出 PNG。容器尺寸、槽位坐标、标题文字全部来自反编译源码——`AbstractContainerMenu` 子类里那串 `addSlot(new Slot(..., x, y))`、`AbstractContainerScreen` 的 `super(..., 176, 168)` 与 `extractBackground` 的 `blit` 切片，由 `scripts/extract-containers.py` 提取成 `containers.json`（25 个容器）。箱子是两段拼接（上盖 + 玩家背包，`v=126`）、大箱子的背包第一行在 `y=85` 不是 84，这些都不是估出来的。标题和堆叠数字走真正的位图字体：`advance = 字形最右非透明列 + 1`，空格的 4 像素来自 `font/include/space.json` 的 space provider。
 - **该动的都在动**。水、岩浆、火、海带这些 `.mcmeta` 动画贴图按游戏自己的节奏播放——`frametime` 是几就几 tick 换一帧，`frames` 里写了来回序列的（岩浆是 0..19 再 18..1）就按序列走，列表缩略图也一样动。音效列表挂的是官方字幕中文名（「方块：被破坏」），路径退到第二行方便复制。
 - **素材不进仓库**。500MB 的纹理和音效由一条命令从 Mojang 官方端点拉回来，仓库里只放代码和那些**无法重建**的派生数据。
 
@@ -46,6 +47,8 @@ pnpm run setup:lite   # 下载约 130MB，落盘 145MB；完整版再多半 GB �
 | `mc-assets/26.3/**` | 官方纹理、音效、模型、语言文件 | ❌ 由 `setup` 重建 |
 | `scripts/fetch-assets.mjs` | 素材管线：piston-meta → client.jar → 解包 + 建索引 | ✅ |
 | `scripts/assets.mjs` | 素材管线的统一入口（sync/ensure/verify/lock/stats） | ✅ |
+| `scripts/extract-containers.py` | 从反编译源码提取容器槽位/尺寸/切片 → `containers.json` | ✅ |
+| `src/lib/workspace.ts` | 工作区模型：容器节点、槽位物品、序列化 | ✅ |
 
 ## 为什么仓库里没有素材
 
