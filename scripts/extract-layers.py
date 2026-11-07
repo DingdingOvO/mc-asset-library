@@ -439,6 +439,83 @@ def label_of(path, default_tex):
     return '·'.join(ZH.get(w, w) for w in words)
 
 
+# 村民的职业与生态型是「同模型 + 换贴图」的叠加层。
+#
+# @why VillagerProfessionLayer 的贴图名是运行时拼的
+#      （textures/entity/villager/<path>/<id>.png），静态解析拿不到任何一个具体路径；
+#      而它又是少数几个真正常用的状态（15 种职业 × 7 种生态型），
+#      漏掉的话村民永远只有一件灰袍子。
+# 生态型贴图名与语言键对不上的几个
+VILLAGER_TYPE_ZH = {
+    'desert': '沙漠',
+    'jungle': '丛林',
+    'plains': '平原',
+    'savanna': '热带草原',
+    'snow': '雪原',
+    'swamp': '沼泽',
+    'taiga': '针叶林',
+}
+
+VILLAGER_AXES = (
+    ('type', '生态型', 'biome.minecraft.', 'entity/villager/type/plains'),
+    ('profession', '职业', 'entity.minecraft.villager.', None),
+)
+
+
+def villager_variants():
+    """枚举 villager/<path> 下的贴图，返回 (layers, axes)"""
+    lang = {}
+    lang_path = os.path.join(ROOT, 'mc-assets', VERSION, 'lang', 'zh_cn.json')
+    if os.path.exists(lang_path):
+        lang = json.load(open(lang_path, encoding='utf-8'))
+
+    layers = []
+    axes = []
+    for path, zh, lang_prefix, default in VILLAGER_AXES:
+        folder = os.path.join(TEXTURES, 'villager', path)
+        if not os.path.isdir(folder):
+            continue
+        names = sorted(n[:-4] for n in os.listdir(folder)
+                       if n.endswith('.png') and not n.endswith('.mcmeta'))
+        if not names:
+            continue
+        opts = [{'k': 'none', 'zh': '无', 't': None}]
+        for name in names:
+            # @why 生态型的贴图名是 snow，语言文件里的键却是 biome.minecraft.snowy_plains，
+            #      直接拼会漏掉这一项，下拉框里冒出个英文 snow
+            zh_name = lang.get(lang_prefix + name) or VILLAGER_TYPE_ZH.get(name) or name
+            opts.append({
+                'k': f'entity/villager/{path}/{name}',
+                'zh': zh_name,
+                't': f'entity/villager/{path}/{name}',
+            })
+        # 图层类的构造参数靠 path 区分，这里用 # 后缀拆成两条独立图层
+        cls = 'VillagerProfessionLayer#' + path
+        layers.append({'c': cls, 'm': None, 't': opts[1]['t'] if not default else default})
+        axis = {'k': 'layer:' + cls, 'zh': zh, 'layer': cls, 'opts': opts}
+        if default:
+            axis['default'] = default
+        axes.append(axis)
+    return layers, axes
+
+
+def apply_villager_axes(layers_out, axes_out, table):
+    layers, axes = villager_variants()
+    if not layers:
+        return
+    # @constraint 不能用「已存在于 layers/axes」当条件：村民本来就是个没有任何
+    #      变体的普通生物，两个表里都没有它，等于永远加不上职业轴。
+    for entity in ('villager', 'villager_baby'):
+        if entity == 'villager' and entity not in table:
+            continue
+        merged = list(layers_out.get(entity, []))
+        for item in layers:
+            if not any(m['c'] == item['c'] for m in merged):
+                merged.append(item)
+        layers_out[entity] = merged
+        axes_out[entity] = list(axes_out.get(entity, [])) + axes
+
+
 def main():
     build_index()
     build_consts()
@@ -530,6 +607,8 @@ def main():
                 'dye': 1,
                 'default': 'white' if wool else 'none',
             })
+
+    apply_villager_axes(layers_out, axes_out, table)
 
     payload = {
         'dyes': [{'k': k, 'zh': zh, 'rgb': rgb} for k, zh, rgb in DYE_LIST],

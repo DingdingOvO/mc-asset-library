@@ -69,7 +69,7 @@ export function loadLayers(version: string): Promise<LayerFile> {
   const hit = cache.get(version)
   if (hit) return hit
   const task = (async () => {
-    const response = await fetchWithRetry(`${MC_BASE}/${version}/entitylayers.json?v=1`)
+    const response = await fetchWithRetry(`${MC_BASE}/${version}/entitylayers.json?v=2`)
     if (!response.ok) throw new Error(`图层数据加载失败：${response.status}`)
     return (await response.json()) as LayerFile
   })()
@@ -98,9 +98,11 @@ function rigOf(
 export function defaultChoice(file: LayerFile | null, entity: string, baseTexture: string): Record<string, string> {
   const out: Record<string, string> = {}
   for (const axis of file?.axes[entity] ?? []) {
+    // @why 非染料轴也可能有默认值：村民的生态型是整张身体贴图，默认必须画
+    //      平原那一张，留空等于给村民套一件没有颜色的灰袍（不传 default 的
+    //      图层轴仍然是"无"，比如马的花纹）
     if (axis.k === 'base') out[axis.k] = baseTexture
-    else if (axis.dye) out[axis.k] = axis.default ?? 'none'
-    else out[axis.k] = 'none'
+    else out[axis.k] = axis.default ?? 'none'
   }
   return out
 }
