@@ -34,7 +34,16 @@ export function useVirtualGrid<T>(items: readonly T[], options: VirtualGridOptio
       const node = ref.current
       if (!node) return
 
-      const columns = Math.max(1, Math.floor(node.clientWidth / minColumnWidth))
+      /**
+       * @constraint 列数必须从计算样式读，不能按 minColumnWidth 自己除：
+       *      CSS 在手机断点换了更窄的列宽（104 → 84），两边算法不一致的话
+       *      虚拟滚动会以为只有 3 列、实际排了 4 列，视口底部留半屏空白。
+       */
+      const style = getComputedStyle(node).gridTemplateColumns
+      const columns =
+        style && style !== 'none'
+          ? style.trim().split(/\s+/).length
+          : Math.max(1, Math.floor(node.clientWidth / minColumnWidth))
       const rows = Math.ceil(items.length / columns)
       const rect = node.getBoundingClientRect()
 

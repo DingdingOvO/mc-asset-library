@@ -3,7 +3,8 @@ import type { BakedFace } from '@/lib/blockmodels'
 import type { Poser } from '@/lib/anim'
 import type { EntityLayer, Rig } from '@/lib/entityRig'
 import { entityFaces } from '@/lib/entityRig'
-import { blockFaces, frameCountOf } from '@/lib/faceBuild'
+import { blockAnimOf, blockFaces, type TextureAnim } from '@/lib/faceBuild'
+import { subscribeTicks } from '@/lib/animClock'
 import { textureSrc } from '@/lib/mc'
 import {
   DEFAULT_ROTATION,
@@ -25,7 +26,12 @@ export type Subject =
       kind: 'block'
       faces: BakedFace[]
       textures: string[]
-      frames: number[]
+      /**
+       * 动画贴图参数，键是 textures 的下标。
+       * @why 只有帧数不够：水的 frametime 是 2、火是 1，岩浆还带一条来回序列。
+       *      少了这项，水流快一倍、岩浆朝一个方向硬循环。
+       */
+      anims?: Record<string, TextureAnim>
       display?: DisplayTransform | null
       /** 平面物品：正对相机才看得清，斜着看会被压扁 */
       flat?: boolean
@@ -94,7 +100,7 @@ export function subjectPivot(
   blockFacesAt0?: Face3D[] | null,
 ): [number, number, number] {
   if (subject.kind === 'block') {
-    const faces = blockFacesAt0 ?? blockFaces(subject.faces, subject.textures, subject.frames, 0)
+    const faces = blockFacesAt0 ?? blockFaces(subject.faces, subject.textures, subject.anims, 0)
     return pivotOf(faces)
   }
   const rest = subject.poser.pose({ t: 0, speed: 0, pitch: 0, yaw: 0 })
@@ -226,13 +232,21 @@ export function ModelView({
     return (frame: number): Face3D[] => {
       const hit = cache.get(frame)
       if (hit) return hit
-      const built = blockFaces(subject.faces, subject.textures, subject.frames, frame)
+      const built = blockFaces(subject.faces, subject.textures, subject.anims, frame)
       cache.set(frame, built)
       return built
     }
   }, [subject])
 
-  const blockFrames = subject.kind === 'block' ? frameCountOf(subject.frames) : 1
+  /**
+   * 这个方块会不会动、一遍动画有多长、每帧几 tick。
+   * @constraint 必须按面实际引用的贴图算，不能扫整个帧池：池里一千多张静态贴图，
+   *             取最大值等于让每个方块都以为自己在动，整页上百条动画回调一起跑。
+   */
+  const blockAnim = useMemo(
+    () => (subject.kind === 'block' ? blockAnimOf(subject.faces, subject.anims) : null),
+    [subject],
+  )
   const staticFaces = useMemo(() => (facesOf ? facesOf(0) : null), [facesOf])
 
   const textureKey =
@@ -346,7 +360,11 @@ export function ModelView({
        * @constraint 只有非交互预览走缓存。详情页的机位每一帧都可能被拖动，
        *      缓存等于每一帧都写一张新图，纯浪费。
        */
-      const cacheKey = interactive
+      /**
+       * @constraint 会动的方块不能走缩略图缓存：缓存键里没有时间，
+       *      第一次画出来那一帧会被永久记住，滚动回来永远是同一帧。
+       */
+      const cacheKey = interactive || blockAnim
         ? null
         : `t|${textureKey}|${pixels}|${Math.round(spin.current.rx)}|${Math.round(spin.current.ry)}|${Math.round((live?.light ?? 1) * 100)}|${Math.round((live?.zoom ?? 1) * 100)}`
       if (cacheKey) {
@@ -369,10 +387,13 @@ export function ModelView({
         faces = entityFaces(subject.rig, poses, subject.texture, subject.layers)
       } else {
         /**
-         * @constraint 动画贴图按游戏节奏走：Minecraft 的动画帧是每 tick（1/20 秒）
-         *      一换，不是每渲染帧。跟着 rAF 走会让 60fps 的水流快三倍。
+         * @constraint 动画贴图按游戏节奏走：Minecraft 的动画是每 frametime 个 tick
+         *      换一帧（水 2、火 1），不是每渲染帧。跟着 rAF 走会让 60fps 的水流快三倍；
+         *      不分 frametime 则会让水和火用同一个速度，至少有一半是错的。
          */
-        const frameIndex = blockFrames > 1 ? Math.floor(elapsed * 20) % blockFrames : 0
+        const frameIndex = blockAnim
+          ? Math.floor(Math.floor(elapsed * 20) / blockAnim.frametime) % blockAnim.steps
+          : 0
         faces = facesOf ? facesOf(frameIndex) : []
       }
 
@@ -426,7 +447,7 @@ export function ModelView({
       last = now
 
       const state = spin.current
-      const playing = animatedLive.current || blockFrames > 1
+      const playing = animatedLive.current || blockAnim !== null
 
       if (playing) {
         clock.current += dt
@@ -479,28 +500,57 @@ export function ModelView({
       raf = requestAnimationFrame(tick)
     }
 
+    let stopTicks: (() => void) | null = null
+    let observer: IntersectionObserver | null = null
+
     // 纹理是逐像素采样的，必须先解码完成，否则第一帧全是占位灰
     void Promise.all(urls.map((url) => loadTexel(url))).then(() => {
       if (!alive) return
       /**
-       * @constraint 只有详情页跑动画循环。之前把「贴图有动画帧」也算进来，
-       *      方块页/物品页上百张缩略图各自开一条 rAF：每帧要重画 300px 的
-       *      超采样缓冲区，实测整页掉到 11fps，滚动时的长任务一片一片的。
-       *      列表里的动画贴图取一帧代表画面就够了。
+       * @constraint 详情页跑自己的循环（要跟随拖动与惯性），列表卡片只跑贴图动画。
+       *      以前列表卡片完全不跑：有动画的水、火、岩浆全冻在第一帧，
+       *      整页看起来像是"方块就是不会动的静态图"。
        */
       if (interactive) {
         raf = requestAnimationFrame(tick)
-      } else {
-        clock.current = 0.48
-        draw()
+        return
       }
+      clock.current = 0.48
+      draw()
+      if (!blockAnim) return
+
+      /**
+       * 只让真正在视口里的卡片订阅共享时钟。
+       * @why 一页一百多张卡片全订阅，每 50ms 就是一百多次软件光栅化，滚动直接卡死。
+       *      视口内通常只有十来张会动的方块，这个量级刚好在预算内。
+       */
+      const holder = holderRef.current
+      if (!holder) return
+      observer = new IntersectionObserver(
+        (entries) => {
+          const visible = entries.some((entry) => entry.isIntersecting)
+          if (visible && !stopTicks) {
+            stopTicks = subscribeTicks((gameTick) => {
+              clock.current = gameTick / 20
+              draw()
+            })
+          } else if (!visible && stopTicks) {
+            stopTicks()
+            stopTicks = null
+          }
+        },
+        { rootMargin: '120px' },
+      )
+      observer.observe(holder)
     })
 
     return () => {
       alive = false
       cancelAnimationFrame(raf)
+      observer?.disconnect()
+      stopTicks?.()
     }
-  }, [subject, facesOf, blockFrames, textureKey, version, pixels, animated, onViewChange, frame, pivot])
+  }, [subject, facesOf, blockAnim, textureKey, version, pixels, animated, onViewChange, frame, pivot])
 
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!interactive) return

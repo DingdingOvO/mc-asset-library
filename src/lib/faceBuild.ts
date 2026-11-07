@@ -21,28 +21,50 @@ const TINTS: Record<number, [number, number, number]> = {
 }
 
 /**
- * 动画贴图的总帧数。
- *
- * @why 资源包里的动画贴图是一张竖条 PNG（16×512 就是 32 帧 × 16px），帧数来自
- *      .mcmeta 的 animation.frames，烘焙时记进 frames 池。取最大值就能判断
- *      "这个方块自己会动"，不用逐面看。
+ * 动画贴图的完整参数：[帧数, frametime, 回放序列]。
+ * @why frametime 决定节奏（水是每 2 tick 一帧，火是每 tick 一帧），序列决定顺序
+ *      （岩浆是 0..19 再 18..1 来回）。只有帧数的话，水会快一倍、岩浆会硬循环。
  */
-export function frameCountOf(frames: number[] | undefined): number {
-  if (!frames || frames.length === 0) return 1
-  let max = 1
-  for (const count of frames) if (count > max) max = count
-  return max
+export type TextureAnim = [number, number, number[] | null]
+
+/**
+ * 这个方块自己会不会动、按什么节奏动。
+ *
+ * @why 一个方块常挂多张贴图（水 + 水底、火 + 火苗），各自帧数可能不同。取步数最多的
+ *      那张当主控：它决定一遍动画有多长，其余贴图按自己的帧数取模自然循环。
+ * @constraint 必须按面实际引用到的纹理下标统计，不能看整个 frames 池——
+ *      池里有一千多张静态贴图，取最大值等于让每个方块都以为自己在动。
+ */
+export function blockAnimOf(
+  faces: BakedFace[],
+  anims: Record<string, TextureAnim> | undefined,
+): { steps: number; frametime: number } | null {
+  if (!anims) return null
+  let best: { steps: number; frametime: number } | null = null
+  const seen = new Set<number>()
+  for (const face of faces) {
+    const index = face[20] ?? 0
+    if (seen.has(index)) continue
+    seen.add(index)
+    const entry = anims[index]
+    if (!entry) continue
+    const [frames, frametime, seq] = entry
+    const steps = seq && seq.length > 0 ? seq.length : frames
+    if (steps <= 1) continue
+    if (!best || steps > best.steps) best = { steps, frametime: Math.max(1, frametime) }
+  }
+  return best
 }
 
 /**
- * @param frame 当前贴图帧。只有 .mcmeta 动画贴图（水、岩浆、火、海带…）用到，
- *              静态方块固定传 0。uv 的 v 烘焙时是「相对整条竖图」的 0..1，
- *              所以取第 n 帧就是 (v + n) / 总帧数。
+ * @param frame 逻辑帧序号（已经按 frametime 折算过的动画步数），静态方块传 0。
+ * @constraint 不能拿帧序号直接当贴图帧用：有回放序列的贴图要走序列，
+ *             否则岩浆这种「正放 + 倒放」的动画会从中间硬切回第一帧。
  */
 export function blockFaces(
   faces: BakedFace[],
   textures: string[],
-  frames: number[],
+  anims: Record<string, TextureAnim> | undefined,
   frame = 0,
 ): Face3D[] {
   const out: Face3D[] = []
@@ -50,8 +72,14 @@ export function blockFaces(
     const index = face[20] ?? 0
     const tex = textures[index]
     if (!tex) continue
-    const frameCount = frames[index] ?? 1
-    const step = frameCount > 1 ? frame % frameCount : 0
+    const anim = anims?.[index]
+    let step = 0
+    let frameCount = 1
+    if (anim) {
+      frameCount = anim[0] > 0 ? anim[0] : 1
+      const seq = anim[2]
+      step = seq && seq.length > 0 ? seq[frame % seq.length]! : ((frame % frameCount) + frameCount) % frameCount
+    }
     const tintIndex = face[21] ?? -1
     const uv: number[] = []
     for (let i = 0; i < 4; i += 1) {

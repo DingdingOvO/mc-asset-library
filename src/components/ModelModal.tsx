@@ -7,7 +7,7 @@ import { CloseIcon } from './icons'
 import type { AnimFile } from '@/lib/anim'
 import type { Axis, DyeColor } from '@/lib/entityLayers'
 import { motionOf, type Motion } from '@/lib/motion'
-import { blockFaces } from '@/lib/faceBuild'
+import { blockAnimOf, blockFaces } from '@/lib/faceBuild'
 import { entityFaces } from '@/lib/entityRig'
 import { nodesFromFaces, nodesFromRig, sampleAnimation } from '@/lib/gltf'
 import { DEFAULT_ROTATION, ENTITY_ROTATION, FLAT_ROTATION, type Face3D } from '@/lib/scene'
@@ -103,19 +103,14 @@ export function ModelModal({
    * @constraint 不能对整个纹理池取最大值：池子里只要有水，所有方块都会
    *      被标成「32 帧动画」。必须只看这个方块真正用到的那些贴图。
    */
-  const blockFrames = useMemo(() => {
-    if (subject?.kind !== 'block') return 1
-    let max = 1
-    for (const face of subject.faces) {
-      const count = subject.frames[face[20] ?? 0] ?? 1
-      if (count > max) max = count
-    }
-    return max
-  }, [subject])
-  const blockAnimated = blockFrames > 1
+  const blockAnim = useMemo(
+    () => (subject?.kind === 'block' ? blockAnimOf(subject.faces, subject.anims) : null),
+    [subject],
+  )
+  const blockAnimated = blockAnim !== null
 
   const firstFaces = useMemo(
-    () => (subject?.kind === 'block' ? blockFaces(subject.faces, subject.textures, subject.frames, 0) : null),
+    () => (subject?.kind === 'block' ? blockFaces(subject.faces, subject.textures, subject.anims, 0) : null),
     [subject],
   )
 
@@ -130,10 +125,16 @@ export function ModelModal({
         const poses = subject.poser.pose({ t, speed, pitch: 3, yaw: 0 })
         return entityFaces(subject.rig, poses, subject.texture, subject.layers)
       }
-      const frame = blockAnimated ? Math.floor(t * 20) % blockFrames : 0
-      return blockFaces(subject.faces, subject.textures, subject.frames, frame)
+      /**
+       * @constraint 帧号要按 frametime 折算：水是每 2 tick 一帧，直接按 20fps 取帧
+       *      导出的水会比游戏里快一倍，而且和屏幕上的预览对不上。
+       */
+      const frame = blockAnim
+        ? Math.floor(Math.floor(t * 20) / blockAnim.frametime) % blockAnim.steps
+        : 0
+      return blockFaces(subject.faces, subject.textures, subject.anims, frame)
     },
-    [subject, speed, blockAnimated, blockFrames],
+    [subject, speed, blockAnim],
   )
 
   /**
@@ -182,7 +183,13 @@ export function ModelModal({
    * @why 实体是行走步态（左右腿各迈一次），贴图动画是整条帧序列跑完一遍。
    *      两者都不是"想多长就多长"，不告诉导出器，末帧就会停在半个动作上。
    */
-  const cycle = animated ? (motion.cycle != null ? motion.cycle * (speed / motion.initial || 1) : null) : blockAnimated ? blockFrames / 20 : null
+  const cycle = animated
+    ? motion.cycle != null
+      ? motion.cycle * (speed / motion.initial || 1)
+      : null
+    : blockAnim
+      ? (blockAnim.steps * blockAnim.frametime) / 20
+      : null
 
   /**
    * @constraint 必须挂到 body 上：顶栏是 sticky + backdrop-filter，会把弹窗
@@ -238,7 +245,9 @@ export function ModelModal({
                     ))}
                 </>
               ) : blockAnimated ? (
-                <span className="modal__kind">贴图动画 · {blockFrames} 帧 · 20 tick/s</span>
+                <span className="modal__kind">
+                  贴图动画 · {blockAnim!.steps} 步 · {blockAnim!.frametime} tick/帧
+                </span>
               ) : (
                 <span className="modal__kind">静态模型 · 转台预览</span>
               )}

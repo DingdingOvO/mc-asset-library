@@ -1397,18 +1397,75 @@ async function buildBlockModels(outDir, version) {
 
   const texturePool = []
   const framePool = []
+  /**
+   * 稀疏动画表：纹理池索引 → [帧数, frametime, 回放序列]
+   * @why 用对象而不是与 texturePool 对齐的数组：1636 个贴图只有 38 个会动，
+   *      对齐数组里 1598 个 null 就是纯负担。
+   */
+  const animPool = {}
   const textureIndex = new Map()
 
-  const readFrames = async (name) => {
+  /**
+   * 动画贴图的完整参数：帧数、播放节奏、回放序列。
+   *
+   * @why 竖条 PNG 的宽高比只能看出「有几帧」，看不出怎么播：
+   *      水的 animation.frametime 是 2（每 2 tick 换一帧），火是 1，岩浆是 2 外加一条
+   *      40 步的来回序列。只按帧数循环，水会快一倍，岩浆会一直往一个方向循环，
+   *      看起来像贴图在跳帧。
+   * @constraint 只给 n > 1 的贴图建条目。1636 个贴图里只有 38 个真带动画，
+   *      给每个都写一份 {n:1,t:1} 会让 JSON 白胖一百多 KB，而首页要下这个文件。
+   */
+  const readAnim = async (name) => {
+    let n = 1
     try {
       const buffer = await readFile(path.join(outDir, 'textures', `${name}.png`))
-      if (buffer.length < 24) return 1
+      if (buffer.length < 24) return null
       const width = buffer.readUInt32BE(16)
       const height = buffer.readUInt32BE(20)
-      return width > 0 ? Math.max(1, Math.round(height / width)) : 1
+      if (width > 0) n = Math.max(1, Math.round(height / width))
     } catch {
-      return 1
+      return null
     }
+    if (n <= 1) return null
+
+    let frametime = 1
+    let seq = null
+    try {
+      const raw = await readFile(path.join(outDir, 'textures', `${name}.png.mcmeta`), 'utf8')
+      const animation = JSON.parse(raw)?.animation
+      if (animation) {
+        /**
+         * @constraint 缺省必须是 1 而不是 2：Minecraft 的默认值就是每 tick 一帧。
+         *      按 2 兜底会让所有没写 frametime 的动画慢一倍，水面看着像卡住了。
+         */
+        const ft = Number(animation.frametime)
+        if (Number.isFinite(ft) && ft > 0) frametime = ft
+        if (Array.isArray(animation.frames)) {
+          const out = []
+          for (const item of animation.frames) {
+            if (typeof item === 'number') {
+              out.push(item)
+              continue
+            }
+            if (!item || typeof item !== 'object') continue
+            const index = Number(item.index)
+            if (!Number.isInteger(index)) continue
+            const time = Number(item.time)
+            const repeat = Number.isFinite(time) && time > 1 ? Math.round(time) : 1
+            for (let i = 0; i < repeat; i += 1) out.push(index)
+          }
+          /**
+           * @constraint 越界的 index 必须剔掉：序列里的数字直接当成竖图的帧下标去算
+           *      v 偏移，超出帧数就会采到相邻贴图的行，整块方块会出现一条别人的像素。
+           */
+          const safe = out.filter((index) => index >= 0 && index < n)
+          if (safe.length > 0) seq = safe
+        }
+      }
+    } catch {
+      // 没有 mcmeta 就按纯帧数循环，这是绝大多数流动方块的情况
+    }
+    return [n, frametime, seq]
   }
 
   const texId = (name) => {
@@ -1421,7 +1478,10 @@ async function buildBlockModels(outDir, version) {
 
   const fillFrames = async () => {
     for (let i = 0; i < texturePool.length; i += 1) {
-      framePool[i] = await readFrames(texturePool[i])
+      const anim = await readAnim(texturePool[i])
+      if (!anim) continue
+      framePool[i] = anim[0]
+      animPool[i] = anim
     }
   }
 
@@ -1636,12 +1696,53 @@ async function buildBlockModels(outDir, version) {
 
   await fillFrames()
 
+  /**
+   * 面数据分片。
+   *
+   * @why 1160 个方块 + 1574 个物品的面数据合起来 2.2MB，而列表页首屏只需要
+   *      视口里那十几个。整包下发意味着手机上要先解析完 2.4MB JSON 才能显示
+   *      第一个方块，滚动还没开始就等了一秒多。
+   * @constraint 必须按 id 排序后切片：前端拿到的 blockIds 也是同一个排序，
+   *      靠下标 / SHARD_SIZE 就能算出第 k 个条目属于哪一片，不用额外存映射表。
+   */
+  const SHARD_SIZE = 200
+  const bakeShards = async (kind, table) => {
+    const ids = Object.keys(table).sort()
+    const dir = path.join(outDir, 'baked')
+    await mkdir(dir, { recursive: true })
+    const count = Math.max(1, Math.ceil(ids.length / SHARD_SIZE))
+    for (let i = 0; i < count; i += 1) {
+      const part = {}
+      for (const id of ids.slice(i * SHARD_SIZE, (i + 1) * SHARD_SIZE)) part[id] = table[id]
+      await writeFile(path.join(dir, `${kind}.${i}.json`), JSON.stringify(part))
+    }
+    return ids
+  }
+
+  const blockIds = await bakeShards('blocks', blocks)
+  const itemIds = await bakeShards('items', items)
+
   await writeFile(
     path.join(outDir, 'blockmodels.json'),
-    JSON.stringify({ version, textures: texturePool, frames: framePool, blocks, items, displays, hidden, flat }),
+    JSON.stringify({
+      version,
+      textures: texturePool,
+      frames: framePool,
+      anims: animPool,
+      // @constraint 索引清单必须留在 meta 里：列表页要先知道有哪些方块才能排版，
+      //      面数据到滚动时再按片取。顺序就是切片顺序，前端据此算分片下标。
+      blockIds,
+      itemIds,
+      shardSize: SHARD_SIZE,
+      blocks: {},
+      items: {},
+      displays,
+      hidden,
+      flat,
+    }),
   )
 
-  return { blocks: Object.keys(blocks).length, items: Object.keys(items).length }
+  return { blocks: blockIds.length, items: itemIds.length }
 }
 
 
@@ -1677,7 +1778,8 @@ async function writeVersionsManifest() {
       const baked = JSON.parse(
         await readFile(path.join(OUT_ROOT, entry.name, 'blockmodels.json'), 'utf8'),
       )
-      blockCount = Object.keys(baked.blocks ?? {}).length
+      // @why 面数据已经切成分片，meta 里的 blocks 是空的，数量要看索引清单
+      blockCount = (baked.blockIds ?? Object.keys(baked.blocks ?? {})).length
     } catch {
       // 未生成方块模型时忽略
     }
