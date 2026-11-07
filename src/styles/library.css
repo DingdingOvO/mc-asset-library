@@ -1655,3 +1655,14 @@
     opacity: 1;
   }
 }
+
+/**
+ * @why 说明文字固定压在模型区左下角，遇到岩浆、水这种铺满画面的方块就是一串
+ *      灰字浮在橙红像素上，几乎读不出来。给一层浅底，同时不影响棋盘格可见度。
+ */
+.modal__kind,
+.modal__hint {
+  padding: 2px 6px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--surface) 84%, transparent);
+}

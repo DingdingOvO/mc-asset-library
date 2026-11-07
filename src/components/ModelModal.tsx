@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import { ModelView, subjectPivot, type Subject, type ViewState } from './ModelView'
 import { ExportPanel } from './ExportPanel'
@@ -84,6 +84,31 @@ export function ModelModal({
   const flat = subject?.kind === 'block' && Boolean(subject.flat)
   const isEntity = subject?.kind === 'entity'
   const baseRot = flat ? FLAT_ROTATION : isEntity ? ENTITY_ROTATION : DEFAULT_ROTATION
+
+  /**
+   * 预览画布的实际边长。
+   *
+   * @why 以前写死 320：手机上模型区只有 36vh（约 300px）高，画布比容器还大，
+   *      岩浆/水这种铺满画面的方块会直接溢出到左下角的说明文字上。
+   *      按容器短边算，模型永远完整落在棋盘格里。
+   * @constraint 留 24px 内边距，否则描边和阴影会被裁掉一圈。
+   */
+  const viewBoxRef = useRef<HTMLDivElement>(null)
+  const [viewSize, setViewSize] = useState(320)
+
+  useEffect(() => {
+    const node = viewBoxRef.current
+    if (!node) return
+    const measure = () => {
+      const box = node.getBoundingClientRect()
+      if (box.width < 1 || box.height < 1) return
+      setViewSize(Math.max(96, Math.min(320, Math.floor(Math.min(box.width, box.height) - 24))))
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [])
   const [view, setView] = useState<ViewState>({
     rotX: baseRot[0],
     rotY: baseRot[1],
@@ -209,14 +234,14 @@ export function ModelModal({
           <CloseIcon />
         </button>
 
-        <div className="modal__view">
+        <div className="modal__view" ref={viewBoxRef}>
           {empty ? (
             <span className="entry-fallback">{hint ?? '没有可用的立体模型'}</span>
           ) : (
             <ModelView
               subject={subject}
               version={version}
-              size={320}
+              size={viewSize}
               interactive
               animated
               speed={speed}
