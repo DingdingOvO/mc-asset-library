@@ -67,7 +67,18 @@ function SoundBrowser({ version }: { version: string }) {
   const filtered = useMemo(() => {
     const scoped = group === 'all' ? items : items.filter((item) => item.g === group)
     const keyword = query.trim().toLowerCase()
-    return keyword ? scoped.filter((item) => item.p.toLowerCase().includes(keyword)) : scoped
+    if (!keyword) return scoped
+    /**
+     * @constraint 三个字段都要搜：中文名是给人看的（"方块：被破坏"），
+     *      路径是给人抄进资源包的（block/stone/break1），事件 id（block.stone.break）
+     *      是写 sounds.json 时要填的。少搜哪个都会有"明明有却搜不到"。
+     */
+    return scoped.filter(
+      (item) =>
+        item.p.toLowerCase().includes(keyword) ||
+        (item.s?.toLowerCase().includes(keyword) ?? false) ||
+        (item.e?.toLowerCase().includes(keyword) ?? false),
+    )
   }, [items, group, query])
 
   const { visible, sentinelRef, total, shown } = usePaged(filtered, 200)
@@ -165,12 +176,20 @@ function SoundBrowser({ version }: { version: string }) {
             type="button"
             className="sound-row"
             aria-pressed={playing === sound.p}
+            title={sound.e ? `${sound.s ?? sound.p}\n事件 ${sound.e}` : sound.p}
             onClick={() => toggle(sound.p)}
           >
             <span className="sound-row__play">
               {playing === sound.p ? <PauseIcon /> : <PlayIcon />}
             </span>
-            <span className="sound-row__name">{sound.p}</span>
+            <span className="sound-row__text">
+              {/*
+                @why 主标题放官方字幕中文名：音效路径（block/stone/break1）是给机器看的，
+                人翻列表时想知道的是"这是什么声音"。路径降为副标题，照样能看能复制。
+              */}
+              <span className="sound-row__name">{sound.s ?? sound.p}</span>
+              <span className="sound-row__path">{sound.p}</span>
+            </span>
             <span className="sound-row__group">{GROUP_LABELS[sound.g] ?? sound.g}</span>
             <span className="sound-row__size">{formatBytes(sound.k)}</span>
           </button>

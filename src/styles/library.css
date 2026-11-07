@@ -553,10 +553,26 @@
   color: var(--accent-contrast);
 }
 
-.sound-row__name {
+.sound-row__text {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
   flex: 1;
   min-width: 0;
+}
+
+.sound-row__name {
   font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* @why 路径是给人复制的，用等宽字体；不抢中文名的视觉重心，所以压到 11px 且降色 */
+.sound-row__path {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1507,4 +1523,135 @@
   display: block;
   margin: 8px 0 0;
   line-height: 1.5;
+}
+
+/* ---------- 手机布局 ---------- */
+
+/**
+ * @why 这里是一整套覆盖而不只是"改成单列"。之前只写了 grid-template-columns: 1fr，
+ *      但 .modal 的行定义还是 minmax(0, 1fr)（只有一行），单列之后模型区和信息栏
+ *      变成两行，第二行内容超高把第一行压成 0 高——手机上点开方块，模型区整块消失，
+ *      只剩左下角那行提示被挤成竖排单字。三处一起改才能解决。
+ */
+@media (max-width: 760px) {
+  .modal-backdrop {
+    /* @why 24px 的内边距在手机上等于白扔 48px 高度，弹窗内容本来就超过一屏 */
+    padding: 8px;
+  }
+
+  .modal,
+  .modal--block {
+    grid-template-columns: 1fr;
+    grid-template-rows: auto minmax(0, 1fr);
+    width: 100%;
+    max-height: 100%;
+  }
+
+  /* 模型区给固定高度：它是"看一眼"的区域，不该被下面信息栏的高度牵着走 */
+  .modal__view,
+  .modal--block .modal__view {
+    height: 36vh;
+    max-height: 280px;
+    min-height: 160px;
+    padding: 10px;
+  }
+
+  .modal__hint {
+    left: 10px;
+    bottom: 8px;
+    font-size: 10.5px;
+  }
+
+  .modal--block .modal__side {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  .modal__body {
+    padding: 12px 14px 16px;
+  }
+
+  /* 音效行在窄屏放不下四列；分组和体积都不是关键信息，让位给中文名与路径 */
+  .sound-row__group,
+  .sound-row__size {
+    display: none;
+  }
+}
+
+@media (max-width: 640px) {
+  /* @why 七项导航在 390px 下每项只有 38×29，拇指点不准。
+     收紧左右内边距把七项塞进一屏，塞不下时再横滚，并用渐隐暗示还有内容。 */
+  .topbar__link {
+    padding: 9px 5px;
+    font-size: 12.5px;
+  }
+
+  .topbar__nav {
+    mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 22px), transparent);
+  }
+
+  /* 搜索框独占一行，开关落到下一行，避免两个控件互相挤压 */
+  .browse-bar {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .browse-bar > .search {
+    flex: 1 1 100%;
+  }
+
+  .page-head h1 {
+    font-size: 22px;
+  }
+
+  /* @constraint 列宽只能改到 84px：虚拟滚动的 rowHeight 是写死的 118+2，
+     卡片高度跟着名字行数变会让估算总高漂移，滚动时整列卡片前后错位 */
+  .block-grid {
+    grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
+    gap: 0;
+    margin-top: 12px;
+  }
+
+  .block-cell {
+    padding: 8px 2px 6px;
+  }
+
+  .block-cell__name {
+    font-size: 11px;
+  }
+
+  .tex-grid {
+    grid-template-columns: repeat(auto-fill, minmax(72px, 1fr));
+  }
+}
+
+/* @why chips 是横向滚动容器，但在 flex 行里默认 min-width: auto 会被内容撑开，
+      整页宽度跟着变成 1680px。这一条是"页面能左右拖动"的根因，不分断点都该有。 */
+.browse-bar > .chips {
+  min-width: 0;
+  flex: 1 1 auto;
+}
+
+/**
+ * @why 分片还没到时的占位必须占满和模型一样的位置（64~76px 见方），
+ *      否则每回来一片，整列卡片的高度都会跳一下，滚动位置跟着飘。
+ */
+.block-cell__pending {
+  display: block;
+  width: 76px;
+  height: 76px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  animation: pending-pulse 1.4s ease-in-out infinite;
+}
+
+@keyframes pending-pulse {
+  0%,
+  100% {
+    opacity: 0.5;
+  }
+  50% {
+    opacity: 1;
+  }
 }
