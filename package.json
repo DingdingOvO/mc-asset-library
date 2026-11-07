@@ -10,6 +10,7 @@
     "build": "tsc -b && vite build",
     "preview": "vite preview",
     "start": "node scripts/serve.mjs",
+    "start:site": "node scripts/serve-site.mjs",
     "setup": "node scripts/assets.mjs sync",
     "setup:lite": "node scripts/assets.mjs sync --lite",
     "assets": "node scripts/assets.mjs",
