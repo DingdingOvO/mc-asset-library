@@ -17,6 +17,7 @@
 输入：CFR 反编译后的 net/minecraft/client/model 目录
 输出：entitymodels.json
 """
+import ast
 import json
 import os
 import re
@@ -306,6 +307,9 @@ def eval_math(text, env):
     """
     import math as _math
 
+    # @why Mth.cos / Mth.sin 就是转调 Math 的同一批函数，烈焰人 12 根棒子
+    #      的坐标全靠 Mth.cos(angle) 算，不认 Mth 前缀就全叠在原点
+    text = text.replace('Mth.', 'Math.')
     funcs = {
         'cos': _math.cos,
         'sin': _math.sin,
@@ -318,10 +322,14 @@ def eval_math(text, env):
         'toDegrees': _math.degrees,
     }
     for _ in range(12):
-        m = re.search(r'Math\.(\w+)\s*\(([^()]*)\)', text)
+        # @constraint 不能用 `\(([^()]*)\)` 抓参数：烈焰人的 y 是
+        #      `Mth.cos((float)(i * 2) * 0.25f)`，参数里有嵌套括号，
+        #      正则匹配不上整条调用，12 根棒子就全被算成 y=0
+        m = re.search(r'Math\.(\w+)\s*\(', text)
         if not m or m.group(1) not in funcs:
             break
-        inner = eval_math(m.group(2), env)
+        inner, end = read_balanced(text, m.end())
+        inner = eval_math(inner, env)
         # 参数里的局部变量要先代进去：Math.cos(angle) 里的 angle 是上一条语句算的
         inner = re.sub(
             r'\b([A-Za-z_]\w*)\b',
@@ -335,8 +343,71 @@ def eval_math(text, env):
         # @constraint 固定小数位输出：repr 会给出 6.1e-17 这种科学计数法，
         #              后面按标识符替换时 e 会被当成未知变量抹成 0，
         #              坐标系整个算飞（鱿鱼触手 x 变成 -78）。
-        text = text[: m.start()] + ('%.8f' % value) + text[m.end():]
+        text = text[: m.start()] + ('%.8f' % value) + text[end:]
     return text.replace('Math.PI', repr(_math.pi))
+
+
+def sub_static_calls(text, env, depth=0):
+    """
+    把 Cls.method(参数) 这种返回数值的静态调用换成算好的数字。
+
+    @why 守护者 12 根尖刺的坐标全在 getSpikeX/Y/Z 里，每个 i 对应一个方向。
+          不求值的话 12 根尖刺全部落在同一点，整只守卫者变成一个球。
+    """
+    if depth > 4:
+        return text
+
+    def repl(m):
+        sig = all_methods(m.group(1)).get(m.group(2))
+        if not sig or sig[0] not in ('float', 'double', 'int', 'long'):
+            return m.group(0)
+        inner, _ = read_balanced(m.group(0), m.group(0).find('(') + 1)
+        local = dict(env)
+        for pname, arg in zip(sig[1], split_args(inner)):
+            local[pname] = num(arg, env)
+        rm = re.search(r'return\s+(.+?);', sig[2], re.S)
+        if not rm:
+            return m.group(0)
+        value = num(sub_static_calls(rm.group(1), local, depth + 1), local)
+        return repr(float(value))
+
+    return re.sub(r'\b(\w+)\.(\w+)\s*\([^()]*\)', repl, text)
+
+
+def sub_arrays(text, env):
+    """
+    把 NAME[i] / NAME[i][j] 换成实际数值。
+
+    @constraint 先替换二维再替换一维：`BODY_SIZES[i][1]` 若先走一维规则，
+          会变成 `[4, 3, 2][1]` 这种非法表达式，整条语句直接归零。
+    """
+
+    def pick(name, idx, outer=None):
+        table = None
+        if _CURRENT_CLS:
+            table = ARRAY_CONSTS.get(f'{_CURRENT_CLS}.{name}')
+        table = table or ARRAY_CONSTS.get(name)
+        if table is None:
+            return None
+        try:
+            seq = table if outer is None else table[int(num(outer, env))]
+            return seq[int(num(idx, env))]
+        except (IndexError, TypeError, ValueError):
+            return None
+
+    def two(m):
+        value = pick(m.group(1), m.group(3), m.group(2))
+        return repr(float(value)) if isinstance(value, (int, float)) else m.group(0)
+
+    def one(m):
+        value = pick(m.group(1), m.group(2))
+        if isinstance(value, (list, tuple)):
+            return m.group(0)
+        return repr(float(value)) if isinstance(value, (int, float)) else m.group(0)
+
+    text = re.sub(r'\b(\w+)\s*\[([^\[\]]+)\]\s*\[([^\[\]]+)\]', two, text)
+    text = re.sub(r'\b(\w+)\s*\[([^\[\]]+)\]', one, text)
+    return text
 
 
 def num(expr, env=None):
@@ -361,6 +432,8 @@ def num(expr, env=None):
     text = re.sub(r'(\d+(?:\.\d+)?)[fFdDlL]\b', r'\1', text)
     # 数学库：鱿鱼八条触手的坐标是 Math.cos(i * 2π / 8) 算出来的，
     # 不认 Math.* 就全叠在原点，整只鱿鱼只剩一根触手。
+    text = sub_arrays(text, env)
+    text = sub_static_calls(text, env)
     text = eval_math(text, env)
     # 带点路径的标识符优先整体查表（PartNames.LEFT_LEG 之类）
     def repl(m):
@@ -674,6 +747,45 @@ def load_name_consts():
         NAME_CONSTS[m.group(1)] = m.group(2)
 
 
+ARRAY_CONSTS = {}
+_CURRENT_CLS = None
+
+
+def parse_array_literal(text):
+    """new int[][]{{4,3,2},...} / new float[]{1.75f,...} → 嵌套的 float 列表"""
+    body = text.strip()
+    body = re.sub(r'^new\s+\w+\s*(?:\[\s*\])*\s*', '', body)
+    body = re.sub(r'(\d)[fFdDlL]\b', r'\1', body)
+    body = body.replace('{', '[').replace('}', ']')
+    try:
+        value = ast.literal_eval(body)
+    except Exception:
+        return None
+    return value if isinstance(value, (list, tuple)) else None
+
+
+def load_array_consts():
+    """
+    类内 static final 数组常量。
+
+    @why 蠹虫 / 末影螨 / 守护者的每一段躯干尺寸都写在这些表里（BODY_SIZES、
+          SPIKE_X_ROT…）。不认数组就等于所有段都是 0×0，整只生物退化成几个
+          看不见的点。
+    """
+    for cls in class_files():
+        src = class_src(cls) or ''
+        for m in re.finditer(r'static\s+final\s+[\w\[\]]+\s+(\w+)\s*=\s*new\s+[\w.]+', src):
+            brace = src.find('{', m.end())
+            if brace < 0:
+                continue
+            inner, _ = read_block(src, brace + 1)
+            value = parse_array_literal('[' + inner.replace('{', '[').replace('}', ']') + ']')
+            if not value:
+                continue
+            ARRAY_CONSTS[f'{cls}.{m.group(1)}'] = value
+            ARRAY_CONSTS.setdefault(m.group(1), value)
+
+
 def run_method(cls, name, args, ctx, arg_vals, depth=0):
     """
     解释执行一个静态几何方法，返回它 return 出来的部件 id。
@@ -694,13 +806,55 @@ def run_method(cls, name, args, ctx, arg_vals, depth=0):
     for idx, pname in enumerate(params):
         if idx < len(arg_vals):
             local[pname] = arg_vals[idx]
+    global _CURRENT_CLS
     saved = dict(ctx.env)
     ctx.env.update(local)
+    prev_cls, _CURRENT_CLS = _CURRENT_CLS, cls
     try:
         result = exec_block(statements(body), ctx, depth + 1, cls)
     finally:
         ctx.env = {**saved, **{k: v for k, v in ctx.env.items() if k not in local}}
+        _CURRENT_CLS = prev_cls
     return result
+
+
+def eval_cond(header, env):
+    """
+    求值 `if (...)` 的条件，返回 True / False / None（判不出来）。
+
+    @why 岩浆怪的每一层 UV 都靠 `if (i > 0 && i < 4)` 选，把条件当恒真执行会
+          让后四层全部取到 i<4 的贴图区，整个怪糊成一片。
+    @constraint 判不出来时必须返回 None 而不是 False：解析器不认识的条件（含
+          this.xxx、方法返回值）宁可按"执行"处理，退化成原来的行为，
+          否则会整块整块地丢部件。
+    """
+    m = re.match(r'if\s*\(', header)
+    if not m:
+        return None
+    inner, _ = read_balanced(header, m.end())
+    expr = inner.strip().replace('&&', ' and ').replace('||', ' or ')
+    expr = re.sub(r'!(?!=)', ' not ', expr)
+    expr = re.sub(r'(\d+(?:\.\d+)?)[fFdDlL]\b', r'\1', expr)
+
+    def repl(mo):
+        key = mo.group(0)
+        # @constraint and/or/not 是上一步替换出来的关键字，不能当成标识符抹掉，
+        #      否则 `i > 0 && i < 4` 永远判不出来，岩浆怪后四层会取错贴图区
+        if key in ('and', 'or', 'not'):
+            return key
+        if key in ('true', 'false'):
+            return key.capitalize()
+        if isinstance(env.get(key), (int, float)):
+            return repr(float(env[key]))
+        return '__unknown__'
+
+    expr = re.sub(r'[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)*', repl, expr)
+    if '__unknown__' in expr:
+        return None
+    try:
+        return bool(eval(expr, {'__builtins__': {}}, {}))
+    except Exception:
+        return None
 
 
 def exec_block(nodes, ctx, depth, cls):
@@ -718,9 +872,11 @@ def exec_block(nodes, ctx, depth, cls):
             continue
 
         _, header, then_block, else_block = node
-        # for 循环：恶魂的九根触手、蜜蜂的复眼都是循环里建的
-        fm = re.match(r'for\s*\(\s*(?:int|long)\s+(\w+)\s*=\s*(-?\d+)\s*;'
-                      r'\s*\1\s*<\s*([\w.]+)\s*;\s*\+\+\1\s*\)', header)
+        # for 循环：恶魂的九根触手、烈焰人的十二根棒子都是循环里建的
+        # @constraint 循环变量可以声明在 for 头里，也可以在外面先 `int i;` 再
+        #      `for (i = 0; ...)`——BlazeModel 是后者，只认前者会只剩一个头
+        fm = re.match(r'for\s*\(\s*(?:(?:int|long)\s+)?(\w+)\s*=\s*(-?\d+)\s*;'
+                      r'\s*\1\s*<\s*([\w.]+)\s*;\s*(?:\+\+\1|\1\+\+)\s*\)', header)
         if fm:
             var, start, limit_expr = fm.group(1), int(fm.group(2)), fm.group(3)
             limit = int(num(limit_expr, ctx.env)) if num(limit_expr, ctx.env) else 0
@@ -734,8 +890,17 @@ def exec_block(nodes, ctx, depth, cls):
             ctx.env.pop(var, None)
             continue
 
-        if header.startswith('if'):
-            outcome = exec_block(statements(then_block), ctx, depth + 1, cls)
+        head = header[len('else'):].strip() if header.startswith('else') else header
+        # @why `else if (c) {` 在 statements 里是独立 block（不是 else 块），
+        #      当成普通 if 处理：岩浆怪的 u/v 两组条件是互斥的，结果一致
+        if head.startswith('if'):
+            cond = eval_cond(head, ctx.env)
+            if cond is False:
+                if else_block is None:
+                    continue
+                outcome = exec_block(statements(else_block), ctx, depth + 1, cls)
+            else:
+                outcome = exec_block(statements(then_block), ctx, depth + 1, cls)
             if isinstance(outcome, int):
                 result = outcome
             continue
@@ -927,10 +1092,28 @@ def exec_stmt(stmt, ctx, depth, cls):
         env[m.group(1)] = float(roll)
         return None
 
+    # 无初始化声明：float x; int i;（烈焰人先声明再在循环里反复赋值）
+    # @constraint 必须给 0 兜底：后面的 `x = ...` 只认 env 里已存在的变量，
+    #      不给就整条赋值被丢，12 根棒子全站在原点
+    m = re.match(r'(?:final\s+)?(?:float|double|int|long)\s+(\w+)$', stmt)
+    if m:
+        env[m.group(1)] = 0.0
+        return None
+
     # 局部变量：float x = ...;
     m = re.match(r'(?:final\s+)?(?:float|double|int)\s+(\w+)\s*=\s*(.+)$', stmt)
     if m:
         env[m.group(1)] = num(m.group(2), env)
+        return None
+
+    # 复合赋值：angle += 1.5707964f;（烈焰人的每一层棒子靠这一步转 90°）
+    m = re.match(r'^(\w+)\s*\+=?\s*(.+)$', stmt)
+    if m and m.group(1) in env:
+        env[m.group(1)] = num(m.group(1), env) + num(m.group(2), env)
+        return None
+    m = re.match(r'^(\w+)\s*-=\s*(.+)$', stmt)
+    if m and m.group(1) in env:
+        env[m.group(1)] = num(m.group(1), env) - num(m.group(2), env)
         return None
 
     # 已知局部变量的再赋值：angle = i * Math.PI * -2.0 / 8.0 + 1.57…;
@@ -1126,32 +1309,253 @@ def png_size(path):
     return struct.unpack('>II', head[16:24])
 
 
-def match_texture(key):
-    """在 textures/entity 下找对应皮肤（变体优先 temperate / brown）"""
-    base = re.sub(r'^(adult_|baby_)', '', key)
+_tex_index = None
+
+
+def tex_index():
+    """
+    textures/entity 下的 stem → 贴图相对路径索引。
+
+    @why 原实现每匹配一个模型就 os.walk 一遍整棵贴图树，263 个模型等于 263 次
+          全盘遍历；建一次索引后全是字典查找，提取时间从十几秒降到两秒。
+    """
+    global _tex_index
+    if _tex_index is not None:
+        return _tex_index
+    idx = {}
     ent = os.path.join(TEXTURES, 'entity')
-    if not os.path.isdir(ent):
-        return None
+    if os.path.isdir(ent):
+        for dirpath, _dirs, files in os.walk(ent):
+            rel = os.path.relpath(dirpath, ent).replace(os.sep, '/')
+            for name in files:
+                if name.endswith('.png'):
+                    idx.setdefault(name[:-4], []).append(f'entity/{rel}/{name[:-4]}')
+    _tex_index = idx
+    return idx
+
+
+# 贴图名与模型层键对不上的特例。
+#
+# @why 这些名字来自各渲染器的 getTextureLocation，跟 ModelLayers 的键毫无关系，
+#      靠字符串推断不出来：armor_stand 的贴图叫 armorstand、chest 的叫 normal、
+#      骷髅马叫 horse_skeleton。宁可写死一张表，也不要靠猜。
+TEXTURE_ALIAS = {
+    'armor_stand': ('entity/armorstand/armorstand',),
+    'armor_stand_small': ('entity/armorstand/armorstand',),
+    'chest': ('entity/chest/normal',),
+    'chest_minecart': ('entity/chest/normal',),
+    'command_block_minecart': ('entity/minecart/minecart',),
+    'furnace_minecart': ('entity/minecart/minecart',),
+    'hopper_minecart': ('entity/minecart/minecart',),
+    'spawner_minecart': ('entity/minecart/minecart',),
+    'tnt_minecart': ('entity/minecart/minecart',),
+    'skeleton_horse': ('entity/horse/horse_skeleton',),
+    'skeleton_horse_baby': ('entity/horse/horse_skeleton_baby', 'entity/horse/horse_skeleton'),
+    'zombie_horse': ('entity/horse/horse_zombie',),
+    'zombie_horse_baby': ('entity/horse/horse_zombie_baby', 'entity/horse/horse_zombie'),
+    'donkey': ('entity/horse/donkey',),
+    'mule': ('entity/horse/mule',),
+    'book': ('entity/enchantment/enchanting_table_book',),
+    'ender_dragon': ('entity/enderdragon/dragon',),
+    'elder_guardian': ('entity/guardian/guardian_elder',),
+    'giant': ('entity/zombie/zombie',),
+    'magma_cube': ('entity/slime/magmacube',),
+    'slime_outer': ('entity/slime/slime',),
+    'polar_bear': ('entity/bear/polarbear',),
+    'polar_bear_baby': ('entity/bear/polarbear_baby',),
+    'leash_knot': ('entity/lead_knot/lead_knot',),
+    'shulker_box': ('entity/shulker/shulker',),
+    'shulker_bullet': ('entity/shulker/shulker',),
+    'wither_skull': ('entity/wither/wither',),
+    'wither_skeleton_skull': ('entity/skeleton/wither_skeleton',),
+    'skeleton_skull': ('entity/skeleton/skeleton',),
+    'zombie_head': ('entity/zombie/zombie',),
+    'creeper_head': ('entity/creeper/creeper',),
+    'piglin_head': ('entity/piglin/piglin',),
+    'player_head': ('entity/player/wide/steve',),
+    'dragon_skull': ('entity/enderdragon/dragon',),
+    'conduit': ('entity/conduit/break_particle', 'entity/conduit/base'),
+    # @why 旗帜模型的旗杆 texOffs(44,0) 只有 banner_base.png 画到了，
+    #      base.png 是纯旗面图案（内容到 42×41），拿它当底图旗杆整根透明
+    'standing_banner': ('entity/banner/banner_base',),
+    'wall_banner': ('entity/banner/banner_base',),
+    'standing_banner_flag': ('entity/banner/banner_base',),
+    'wall_banner_flag': ('entity/banner/banner_base',),
+    'boat_water_patch': ('entity/boat/oak',),
+    'cushion': ('entity/cushion/white_cushion',),
+    'copper_golem_running': ('entity/copper_golem/copper_golem',),
+    'copper_golem_sitting': ('entity/copper_golem/copper_golem',),
+    'copper_golem_star': ('entity/copper_golem/copper_golem',),
+    'sulfur_cube': ('entity/sulfur_cube/sulfur_cube_outer',),
+    'sulfur_cube_small': ('entity/sulfur_cube/sulfur_cube_outer_small',),
+    'sulfur_cube_small_inner': ('entity/sulfur_cube/sulfur_cube_inner_small',),
+    'warden_tendrils': ('entity/warden/warden',),
+    'end_crystal': ('entity/end_crystal/end_crystal',),
+    'chest_minecart': ('entity/chest/normal',),
+    'double_chest_left': ('entity/chest/normal_left',),
+    'double_chest_right': ('entity/chest/normal_right',),
+    'parched_outer_layer': ('entity/skeleton/parched',),
+    'sheep_baby_wool': ('entity/sheep/sheep_wool_baby',),
+    'cat_baby_collar': ('entity/cat/cat_collar_baby',),
+    'sniffer_baby': ('entity/sniffer/snifflet',),
+    'villager_no_hat': ('entity/villager/villager',),
+    'villager_baby_no_hat': ('entity/villager/villager_baby',),
+    'zombie_villager_no_hat': ('entity/zombie_villager/zombie_villager',),
+    'zombie_villager_baby_no_hat': ('entity/zombie_villager/zombie_villager_baby',),
+    'player': ('entity/player/wide/steve',),
+    'player_ears': ('entity/player/wide/steve',),
+    'player_cape': ('entity/player/wide/steve',),
+    'player_spin_attack': ('entity/player/wide/steve',),
+    'player_head': ('entity/player/wide/steve',),
+    'player_slim': ('entity/player/slim/steve',),
+    'pufferfish_big': ('entity/fish/pufferfish',),
+    'pufferfish_medium': ('entity/fish/pufferfish',),
+    'pufferfish_small': ('entity/fish/pufferfish',),
+    'salmon_small': ('entity/fish/salmon',),
+    'salmon_large': ('entity/fish/salmon',),
+    # @constraint 名字是反的：TropicalFishRenderer 里 SMALL_TEXTURE = tropical_a.png、
+    #      LARGE_TEXTURE = tropical_b.png。按字面猜会把大鱼的 UV 全部采到空白区，
+    #      渲染出来只剩几个白点。
+    'tropical_fish_large': ('entity/fish/tropical_b',),
+    'tropical_fish_large_pattern': ('entity/fish/tropical_b_pattern_1',),
+    'tropical_fish_small': ('entity/fish/tropical_a',),
+    'tropical_fish_small_pattern': ('entity/fish/tropical_a_pattern_1',),
+    # 装备贴图在 equipment/<kind>/<variant> 下，ModelLayers 的键只到 kind
+    'skeleton_horse_saddle': ('entity/equipment/skeleton_horse_saddle/saddle',),
+    'zombie_horse_saddle': ('entity/equipment/zombie_horse_saddle/saddle',),
+    'horse_saddle': ('entity/equipment/horse_saddle/saddle',),
+    'pig_saddle': ('entity/equipment/pig_saddle/saddle',),
+    'strider_saddle': ('entity/equipment/strider_saddle/saddle',),
+    'camel_saddle': ('entity/equipment/camel_saddle/saddle',),
+    'camel_husk_saddle': ('entity/equipment/camel_husk_saddle/saddle',),
+    'donkey_saddle': ('entity/equipment/donkey_saddle/saddle',),
+    'mule_saddle': ('entity/equipment/mule_saddle/saddle',),
+    'horse_armor': ('entity/equipment/horse_body/iron',),
+    'undead_horse_armor': ('entity/equipment/horse_body/iron',),
+    'llama_decor': ('entity/equipment/llama_body/brown',),
+    'llama_baby_decor': ('entity/equipment/llama_body/brown',),
+    'happy_ghast_harness': ('entity/equipment/happy_ghast_body/brown_harness',),
+    'happy_ghast_baby_harness': ('entity/equipment/happy_ghast_body/brown_harness',),
+    'elytra_baby': ('entity/equipment/wings/elytra',),
+}
+
+
+def _lookup(stem, baby=None):
+    """stem 精确或前缀匹配；baby 指定是否必须命中幼体贴图"""
     best = None
-    for dirpath, _dirs, files in os.walk(ent):
-        rel = os.path.relpath(dirpath, ent).replace(os.sep, '/')
-        first = rel.split('/')[0]
-        for f in files:
-            if not f.endswith('.png'):
-                continue
-            stem = f[:-4]
-            if stem != base and not stem.startswith(base + '_'):
-                continue
+    for s, paths in tex_index().items():
+        if s != stem and not s.startswith(stem + '_'):
+            continue
+        for path in paths:
+            # @why 目录名必须逐条参与排序：creeper 既是生物也是旗帜图案，
+            #      只按文件名匹配会拿到 entity/banner/creeper（64×64 的旗帜底图），
+            #      整只苦力怕变成白色碎片
+            folder = path.split('/')[1]
             score = (
-                0 if first == base else 1,
-                1 if stem.endswith('_baby') else 0,
-                0 if stem == base else 1,
-                0 if stem in (base + '_temperate', base + '_brown') else 1,
-                len(stem),
+                0 if s == stem else 1,
+                0 if folder == stem else 1,
+                0 if (baby is None or s.endswith('_baby') == baby) else 1,
+                0 if any(t in s for t in ('temperate', 'brown', 'normal', 'tabby')) else 1,
+                len(s),
             )
             if best is None or score < best[0]:
-                best = (score, f'entity/{rel}/{stem}')
+                best = (score, path)
     return best[1] if best else None
+
+
+LAYER_SUFFIX = (
+    '_outer_layer', '_outer', '_inner', '_overlay', '_tendrils', '_ropes',
+    '_harness', '_decor', '_saddle', '_armor', '_flag', '_pattern',
+)
+
+
+def texture_candidates(key):
+    """按优先级产出候选贴图路径（尚未做尺寸校验）"""
+    out = []
+
+    def add(path):
+        if path and path not in out:
+            out.append(path)
+
+    for path in TEXTURE_ALIAS.get(key, ()):
+        add(path)
+
+    # boat/oak、chest_boat/oak：键本身就是贴图的相对路径
+    if '/' in key:
+        add('entity/' + key)
+    # oak_boat → entity/boat/oak，bamboo_chest_raft → entity/chest_boat/bamboo
+    for pattern, folder in (
+        (r'(.+)_chest_boat$', 'chest_boat'),
+        (r'(.+)_chest_raft$', 'chest_boat'),
+        (r'(.+)_boat$', 'boat'),
+        (r'(.+)_raft$', 'boat'),
+    ):
+        wood = re.match(pattern, key)
+        if wood:
+            add(f'entity/{folder}/{wood.group(1)}')
+
+    stems = []
+
+    def push(stem):
+        if stem and stem not in stems:
+            stems.append(stem)
+
+    push(key)
+    # cold_pig → pig_cold：MC 的贴图命名是 <mob>_<climate>，模型键是 <climate>_<mob>
+    climate = re.match(r'(cold|warm)_(.+)', key)
+    if climate:
+        mob = climate.group(2)
+        if mob.endswith('_baby'):
+            push(f'{mob[:-5]}_{climate.group(1)}_baby')
+            push(mob[:-5])
+        else:
+            push(f'{mob}_{climate.group(1)}')
+            push(mob)
+    for suffix in LAYER_SUFFIX:
+        if key.endswith(suffix):
+            cut = key[: -len(suffix)]
+            push(cut)
+            push(cut + '_overlay')
+    if key.endswith('_baby'):
+        push(key[:-5])
+
+    baby = key.endswith('_baby')
+    for stem in stems:
+        if '/' in stem:
+            continue
+        add(_lookup(stem, baby=True if baby else None))
+        if baby:
+            add(_lookup(stem, baby=None))
+    return out
+
+
+def match_texture(key, want=None):
+    """
+    在 textures/entity 下找对应皮肤，返回 (路径, 整数倍数, 实际尺寸)。
+
+    @constraint 贴图尺寸必须是模型声明尺寸的整数倍，且横纵倍数相同：UV 全是
+          绝对像素坐标，拿 64×64 的成年贴图去配 32×32 的幼年模型，整只生物
+          都是错位的色块；而 128×64 的贴图配 64×32 的模型只是 2 倍分辨率，
+          把 UV 同样放大 2 倍即可，不算错。其余情况宁可留空。
+    """
+    for path in texture_candidates(key):
+        size = png_size(os.path.join(TEXTURES, path + '.png'))
+        if not size:
+            continue
+        if want and all(want):
+            if size[0] < want[0] or size[1] < want[1]:
+                # 贴图比模型声明的还小，说明配错了对象
+                continue
+            if size[0] % want[0] == 0 and size[1] % want[1] == 0:
+                sx, sy = size[0] // want[0], size[1] // want[1]
+                if sx == sy:
+                    return path, sx, size
+            # 非等比（贴图右侧/下方留白）：UV 仍按模型声明尺寸归一化
+            return path, 1, None
+        return path, 1, size
+    if os.environ.get('TEX_DEBUG'):
+        print(f'  [tex] {key} want={want} 候选={texture_candidates(key)}', file=sys.stderr)
+    return None, 1, None
 
 
 # ---------------------------------------------------------------- 主流程
@@ -1190,7 +1594,7 @@ def flatten(parts, root):
     return out
 
 
-def build_model(layer_id, info, tex_key):
+def build_model(layer_id, info, tex_key, tex_scale=1, tex_size=None):
     ctx = Ctx()
     root = run_method(info['cls'], info['method'], {}, ctx, [eval_arg(a, {}) for a in info['args']])
     if root is None:
@@ -1216,9 +1620,15 @@ def build_model(layer_id, info, tex_key):
     if len(parts) <= 1 and not parts[0]['boxes']:
         return None
 
+    if tex_scale != 1:
+        # 高清贴图：模型按 64×32 声明，贴图是 128×64，UV 同步放大后归一化结果不变
+        for part in parts:
+            for box in part['boxes']:
+                box['uv'] = [round(v * tex_scale, 4) for v in box['uv']]
+
     return {
-        'texW': info['texW'] or 64,
-        'texH': info['texH'] or 32,
+        'texW': (tex_size[0] if tex_size else None) or info['texW'] or 64,
+        'texH': (tex_size[1] if tex_size else None) or info['texH'] or 32,
         'texture': tex_key,
         'parts': parts,
         'warn': ctx.warnings[:4],
@@ -1247,6 +1657,7 @@ def layer_paths():
 
 def main():
     load_name_consts()
+    load_array_consts()
     defs = parse_layer_defs()
     print('LayerDefinitions 解析到', len([k for k in defs if not k.startswith('@')]), '个局部变量 /',
           len([k for k in defs if k.startswith('@')]), '个 layer 绑定')
@@ -1265,8 +1676,8 @@ def main():
         if not found:
             missing.append(layer)
             continue
-        tex_key = match_texture(layer)
-        built = build_model(layer, found, tex_key)
+        tex_key, tex_scale, tex_size = match_texture(layer, (found.get('texW'), found.get('texH')))
+        built = build_model(layer, found, tex_key, tex_scale, tex_size)
         if not built:
             missing.append(layer)
             continue

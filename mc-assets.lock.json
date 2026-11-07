@@ -1,6 +1,6 @@
 {
   "version": "26.3",
-  "generatedAt": "2026-11-01T14:31:22.746Z",
+  "generatedAt": "2026-11-07T00:09:19.906Z",
   "assets": {
     "files": 17269,
     "bytes": 482360080,
@@ -8,8 +8,8 @@
   },
   "derived": {
     "entitymodels.json": {
-      "bytes": 588959,
-      "sha256": "c5e836042dfdec1c6efcf0c89acd80b64bbd2d7e5a85b332d4158a95a021ad90"
+      "bytes": 601370,
+      "sha256": "50d08217e0aabdb7bbc0a7762f51b5f395620587f0ab2d5bc3fa7cf74bcfdf7b"
     },
     "entityanims.json": {
       "bytes": 158039,
