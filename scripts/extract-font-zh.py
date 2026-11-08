@@ -55,7 +55,9 @@ def wanted_text(lang):
         with open(derived, encoding='utf-8') as handle:
             data = json.load(handle)
         for container in data.get('containers', []):
-            for key in ('titleTextZh', 'labelTextZh'):
+            # @why name 是容器在列表里的中文名，村民的标题模板被 plain_title
+            #      换成它之后，"村民交易"这四个字就从这里进字形表
+            for key in ('name', 'titleTextZh', 'labelTextZh'):
                 if container.get(key):
                     out.append(container[key])
             for layer in container.get('layers', []):

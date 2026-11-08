@@ -202,6 +202,30 @@ def _beacon_layers():
     return out
 
 
+def _villager_layers():
+    """MerchantScreen.extractContents / extractProgressBar 里即时画的部分。
+
+    @constraint 箭头的坐标是 decorHeight + 3，而 decorHeight = offerY + 2、
+          offerY 从 topPos + 17 起、每行 +20。写成 22 + 20*i 时错一行就会
+          让 7 个箭头整体上移 2 像素——截图里看着"箭头没对齐格子"。
+    @why 缺货是"某一行"的属性，但 7 个开关放进状态条会挤爆，所以只给一个
+         总开关：全部行统一在售 / 全部缺货。做视频要的是"这家村民有货"。
+    """
+    out = []
+    for i in range(7):
+        out.append({'kind': 'sprite',
+                    'sprite': 'container/villager/trade_arrow_out_of_stock',
+                    'unset': 'container/villager/trade_arrow',
+                    'x': 60, 'y': 22 + i * 20, 'w': 10, 'h': 9, 'value': 'outOfStock'})
+    # extractProgressBar: 背景 102×5 在 (136,16)，填充宽度 = floor(102/(max-min)*(xp-min))
+    out.append({'kind': 'sprite', 'sprite': 'container/villager/experience_bar_background',
+                'x': 136, 'y': 16, 'w': 102, 'h': 5, 'when': 'showXp'})
+    out.append({'kind': 'progress', 'sprite': 'container/villager/experience_bar_current',
+                'x': 136, 'y': 16, 'w': 102, 'h': 5, 'axis': 'x', 'align': 'start',
+                'scale': 102, 'value': 'xp', 'when': 'showXp'})
+    return out
+
+
 DYNAMICS = {
     'furnace': {
         'controls': [
@@ -268,6 +292,14 @@ DYNAMICS = {
         ],
         'layers': [{'kind': 'enchant-row', 'row': row, 'x': 0, 'y': 14 + 19 * row,
                     'w': 108, 'h': 19} for row in range(3)],
+    },
+    'villager': {
+        'controls': [
+            {'key': 'showXp', 'type': 'bool', 'label': '显示经验条', 'default': True},
+            {'key': 'xp', 'type': 'range', 'label': '升级经验', 'default': 0.45},
+            {'key': 'outOfStock', 'type': 'bool', 'label': '全部缺货', 'default': False},
+        ],
+        'layers': _villager_layers(),
     },
     'crafter': {
         'controls': [
@@ -733,6 +765,19 @@ def label_spec(cid, info):
     return out
 
 
+def plain_title(text, fallback):
+    """把带 %s 占位的标题换成能直接画的字面量。
+
+    @why 村民的标题是 merchant.title = "%s - %s"（名字 + 等级）。占位符要运行时
+          代入，画布不会代，结果就是在标题位置画出 "%s - %s" 两个方块。
+    @constraint 不要在渲染层做替换：等级名（学徒/老手）只有提取阶段拿得到语言
+          文件，前端拿不到，替成空串会变成 " - "。
+    """
+    if not text:
+        return fallback
+    return fallback if '%s' in text else text
+
+
 def main():
     containers = []
     problems = []
@@ -775,9 +820,9 @@ def main():
             'height': info['height'],
             'texture': info['texture'],
             'draws': info['draws'],
-            'titleText': lang.get(TITLE_KEYS.get(cid, ''), ''),
+            'titleText': plain_title(lang.get(TITLE_KEYS.get(cid, ''), ''), title),
             'labelText': lang.get('container.inventory', ''),
-            'titleTextZh': lang_zh.get(TITLE_KEYS.get(cid, ''), ''),
+            'titleTextZh': plain_title(lang_zh.get(TITLE_KEYS.get(cid, ''), ''), title),
             'labelTextZh': lang_zh.get('container.inventory', ''),
             'title': {'x': info['labels']['titleLabelX'], 'y': info['labels']['titleLabelY']},
             'labelSpec': label_spec(cid, info),
