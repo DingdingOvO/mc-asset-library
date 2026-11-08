@@ -1,4 +1,4 @@
-import { textureSrc } from './mc'
+import { MC_BASE, textureSrc } from './mc'
 
 /**
  * Minecraft 位图字体（ascii.png）的排版与绘制。
@@ -15,6 +15,19 @@ import { textureSrc } from './mc'
 const GRID = 16
 const CELL = 8
 
+/**
+ * 一个中文字形。
+ *
+ * @why 中文不在 ascii.png 里：原版走 unihex provider，点阵是 16×16 的十六进制
+ *      位图，绘制时按 oversample=2 缩到 8px 高。advance 由 UnihexProvider.Glyph
+ *      算出：width()/2 + 1，width 是左右各裁掉全透明列之后的宽度。
+ */
+interface ZhGlyph {
+  /** 16 行 × 4 个 hex 字符 = 32 位十六进制串 */
+  bits: string
+  advance: number
+}
+
 export interface GlyphFont {
   version: string
   image: HTMLImageElement
@@ -22,6 +35,10 @@ export interface GlyphFont {
   advances: Uint8Array
   /** 按颜色缓存整张染色图集，避免逐字做合成 */
   tinted: Map<string, HTMLCanvasElement>
+  /** 中文字形，键是码点；没有说明是没抽到的字 */
+  zh: Map<number, ZhGlyph>
+  /** 单个中文字的染色位图，键是 `码点|颜色` */
+  zhTiles: Map<string, HTMLCanvasElement>
 }
 
 const fonts = new Map<string, Promise<GlyphFont | null>>()
@@ -30,12 +47,35 @@ export function loadFont(version: string): Promise<GlyphFont | null> {
   const hit = fonts.get(version)
   if (hit) return hit
   const task = (async () => {
-    const image = await loadImage(textureSrc(version, 'font/ascii'))
+    const [image, zh] = await Promise.all([loadImage(textureSrc(version, 'font/ascii')), loadZh(version)])
     if (!image) return null
-    return { version, image, advances: measureAdvances(image), tinted: new Map() }
+    return { version, image, advances: measureAdvances(image), tinted: new Map(), zh, zhTiles: new Map() }
   })()
   fonts.set(version, task)
   return task
+}
+
+/**
+ * 读取中文点阵子集。
+ * @constraint 失败必须静默降级为空表：缺字时标题会退化成 '?'，但整个界面
+ *             不能因为一个可选字体文件挂掉而白屏。
+ */
+async function loadZh(version: string): Promise<Map<number, ZhGlyph>> {
+  const table = new Map<number, ZhGlyph>()
+  try {
+    const response = await fetch(`${MC_BASE}/${version}/font-zh.json`)
+    if (!response.ok) return table
+    const data = (await response.json()) as {
+      glyphs?: Record<string, { b?: string; a?: number }>
+    }
+    for (const [code, glyph] of Object.entries(data.glyphs ?? {})) {
+      if (!glyph.b) continue
+      table.set(Number(code), { bits: glyph.b, advance: glyph.a ?? 9 })
+    }
+  } catch {
+    // 网络抖动不影响拉丁字形可用
+  }
+  return table
 }
 
 function loadImage(src: string): Promise<HTMLImageElement | null> {
@@ -100,9 +140,72 @@ function atlas(font: GlyphFont, color: string): HTMLCanvasElement {
   return canvas
 }
 
+/**
+ * 单个中文字的位图。
+ *
+ * @why 每个字单独缓存而不是拼大图集：容器标题一共十来个字，按需生成比维护
+ *      一张需要动态扩容的图集便宜得多，而且颜色只有两三种。
+ */
+function zhTile(font: GlyphFont, code: number, color: string): HTMLCanvasElement | null {
+  const glyph = font.zh.get(code)
+  if (!glyph) return null
+  const key = `${code}|${color}`
+  const hit = font.zhTiles.get(key)
+  if (hit) return hit
+
+  // @constraint 必须在这里把 16×16 合并成 8×8，不能交给 drawImage 缩放：
+  //      最近邻会丢掉一半像素，汉字笔画碎成孤立点（实测"箱子"完全认不出）；
+  //      双线性又会糊成灰块。2×2 里任意一点亮就算亮，是唯一能保住笔画的降采样，
+  //      相当于把笔画加粗半像素，正好抵消原版 unifont 在小字号下的细笔画。
+  const canvas = document.createElement('canvas')
+  canvas.width = CELL
+  canvas.height = CELL
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return null
+  const image = ctx.createImageData(CELL, CELL)
+  const rgb = parseColor(color)
+  const rows: number[] = []
+  for (let row = 0; row < 16; row += 1) rows.push(parseInt(glyph.bits.slice(row * 4, row * 4 + 4), 16))
+  for (let y = 0; y < CELL; y += 1) {
+    for (let x = 0; x < CELL; x += 1) {
+      let on = 0
+      for (let dy = 0; dy < 2; dy += 1) {
+        const bits = rows[y * 2 + dy] ?? 0
+        for (let dx = 0; dx < 2; dx += 1) {
+          if ((bits >> (15 - (x * 2 + dx))) & 1) on += 1
+        }
+      }
+      if (on > 0) {
+        const index = (y * CELL + x) * 4
+        image.data[index] = rgb[0]
+        image.data[index + 1] = rgb[1]
+        image.data[index + 2] = rgb[2]
+        image.data[index + 3] = 255
+      }
+    }
+  }
+  ctx.putImageData(image, 0, 0)
+  font.zhTiles.set(key, canvas)
+  return canvas
+}
+
+function parseColor(color: string): [number, number, number] {
+  const hex = color.replace('#', '')
+  if (hex.length !== 6) return [64, 64, 64]
+  return [
+    parseInt(hex.slice(0, 2), 16),
+    parseInt(hex.slice(2, 4), 16),
+    parseInt(hex.slice(4, 6), 16),
+  ]
+}
+
 export function textWidth(font: GlyphFont, text: string): number {
   let width = 0
-  for (const ch of text) width += font.advances[ch.codePointAt(0) ?? 63] ?? 9
+  for (const ch of text) {
+    const code = ch.codePointAt(0) ?? 63
+    const zh = font.zh.get(code)
+    width += zh ? zh.advance : (font.advances[code] ?? 9)
+  }
   return width
 }
 
@@ -123,7 +226,16 @@ export function drawText(
   let cursor = x
   for (const ch of text) {
     const code = ch.codePointAt(0) ?? 63
-    // @constraint 超出行范围的字符（中文、符号）画成 '?'：图集里没有就不瞎画
+    if (code >= 256) {
+      const tile = zhTile(font, code, color)
+      if (tile) {
+        // 点阵已在 zhTile 里合并成 8×8，这里 1:1 贴上去，与原版 8px 字高一致
+        ctx.drawImage(tile, cursor, y)
+        cursor += font.zh.get(code)?.advance ?? 9
+        continue
+      }
+    }
+    // @constraint 图集里没有的字符画成 '?'：宁可见到问号，也不要悄悄吞掉
     const slot = code < 256 ? code : 63
     const sx = (slot % GRID) * cellW
     const sy = Math.floor(slot / GRID) * cellH
@@ -143,7 +255,7 @@ export function renderLine(
   color: string,
 ): HTMLCanvasElement | null {
   if (!text) return null
-  const width = textWidth(font, text)
+  const width = Math.ceil(textWidth(font, text))
   if (width <= 0) return null
   const canvas = document.createElement('canvas')
   canvas.width = width

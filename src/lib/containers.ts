@@ -25,6 +25,9 @@ export interface ContainerDef {
   titleText: string
   /** 玩家背包标签文本 */
   labelText: string
+  /** 同上，取自 zh_cn.json；缺语言文件时为空串 */
+  titleTextZh: string
+  labelTextZh: string
   title: { x: number; y: number }
   inventoryLabel: { x: number; y: number }
   /** 槽位，下标即 addSlot 顺序 */

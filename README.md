@@ -2,7 +2,7 @@
 
 **[dingdingovo.github.io/mc-asset-library](https://dingdingovo.github.io/mc-asset-library/)** — 直接打开就能用，不需要本地跑。
 
-在浏览器里翻阅 Minecraft 的全部素材：方块、物品、生物模型、粒子、界面图、音效。
+在浏览器里翻阅 Minecraft 的全部素材：方块、物品、生物模型、粒子、界面图、音效。做视频时不用开游戏对着看——模型在站内直接渲染、动画直接播放，需要成图时把界面摆出来导出。
 
 三件事和常见的「贴图预览站」不一样：
 
@@ -10,7 +10,7 @@
 - **生物模型不是猜的**。几何、UV、动画、渲染图层全部由 `scripts/extract-*.py` 从反编译的 Java 源码里提取，字段与 `ModelPart$Cube`、`setupAnim`、`addLayer` 一一对应。263 个烘焙模型全部有贴图，`for` 循环里建的部件（烈焰人的十二根棒子、末影龙的脖子）、静态数组常量（蠹虫的分段尺寸）、返回数值的静态方法（守护者的十二根尖刺）都按源码求值，不靠猜。
 - **动作量也是**。步态不由"每秒转多少弧度"这类估算驱动，而是照 `LivingEntity.updateWalkAnimation` 实现：速度由位移 ×4 平滑而来、上限 1，位置是速度的逐 tick 累加，所以腿的相位与步幅天然一致（玩家稳定态是 0.864 而不是 1）。史莱姆的伸缩走 `AbstractCubeMob.tick` 的落地/离地双状态、鱿鱼触手走 `|sin(movement)|·π/4`，都是原样搬过来的。
 - **状态能选**。品种、花纹、染色、职业都是下拉框：猫 11 种毛色、狼 27 张、马 7 色 × 5 花纹、村民 7 生态型 × 15 职业（僵尸村民同样）。
-- **界面是可编辑的，不是贴图墙**。「界面」页是一张工作区：左边点一个容器放进来，右边把物品点进格子，最后整体导出 PNG。容器尺寸、槽位坐标、标题文字全部来自反编译源码——`AbstractContainerMenu` 子类里那串 `addSlot(new Slot(..., x, y))`、`AbstractContainerScreen` 的 `super(..., 176, 168)` 与 `extractBackground` 的 `blit` 切片，由 `scripts/extract-containers.py` 提取成 `containers.json`（25 个容器）。箱子是两段拼接（上盖 + 玩家背包，`v=126`）、大箱子的背包第一行在 `y=85` 不是 84，这些都不是估出来的。标题和堆叠数字走真正的位图字体：`advance = 字形最右非透明列 + 1`，空格的 4 像素来自 `font/include/space.json` 的 space provider。
+- **界面是可编辑的，不是贴图墙**。「界面」页是一张工作区：左边点一个容器放进来，右边把物品点进格子，最后整体导出 PNG。容器尺寸、槽位坐标、标题文字全部来自反编译源码——`AbstractContainerMenu` 子类里那串 `addSlot(new Slot(..., x, y))`、`AbstractContainerScreen` 的 `super(..., 176, 168)` 与 `extractBackground` 的 `blit` 切片，由 `scripts/extract-containers.py` 提取成 `containers.json`（23 个容器；游戏里单箱只生成 1~3 行、大箱固定 6 行，所以没有 4/5 行这种档位）。箱子是两段拼接（上盖 + 玩家背包，`v=126`）、大箱子的背包第一行在 `y=85` 不是 84，这些都不是估出来的。标题和堆叠数字走真正的位图字体：拉丁字母是 `advance = 字形最右非透明列 + 1`，空格的 4 像素来自 `font/include/space.json` 的 space provider；中文不在 `ascii.png` 里，走原版 `font/unifont.zip` 的 hex 点阵，`scripts/extract-font-zh.py` 只抽语言文件里真正出现过的字（121 个字形、12KB），`advance = 字宽/2 + 1`、按 oversample=2 落到 8px 高，并对 2×2 像素做合并采样——最近邻降采样会把笔画打碎成孤立点。标题可在面板上切中英，导出图跟着走。
 - **该动的都在动**。水、岩浆、火、海带这些 `.mcmeta` 动画贴图按游戏自己的节奏播放——`frametime` 是几就几 tick 换一帧，`frames` 里写了来回序列的（岩浆是 0..19 再 18..1）就按序列走，列表缩略图也一样动。音效列表挂的是官方字幕中文名（「方块：被破坏」），路径退到第二行方便复制。
 - **素材不进仓库**。500MB 的纹理和音效由一条命令从 Mojang 官方端点拉回来，仓库里只放代码和那些**无法重建**的派生数据。
 

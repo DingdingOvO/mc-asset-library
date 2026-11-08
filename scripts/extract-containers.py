@@ -57,16 +57,15 @@ def std(left, top):
 #      跑 check_constants() 能抓出手抄错。
 CONTAINERS = [
     # --- 箱子系：ChestMenu#addChestGrid(8,18) + inventoryTop = 18+rows*18+13
+    # @why 只列 1/2/3 行与 6 行：ChestMenu 的构造器接受任意 rows，但游戏里
+    #      单箱只生成 1~3 行、大箱子固定 6 行。4/5 行是引擎允许、游戏不存在的
+    #      尺寸，摆进工作区会让人以为原版有这种界面。
     ('chest_1', '箱子（1 行）', 'ChestMenu', 'ContainerScreen', {'containerRows': 1},
      lambda r: grid(8, 18, 9, 1) + std(8, 18 + 1 * 18 + 13)),
     ('chest_2', '箱子（2 行）', 'ChestMenu', 'ContainerScreen', {'containerRows': 2},
      lambda r: grid(8, 18, 9, 2) + std(8, 18 + 2 * 18 + 13)),
     ('chest_3', '箱子（3 行）', 'ChestMenu', 'ContainerScreen', {'containerRows': 3},
      lambda r: grid(8, 18, 9, 3) + std(8, 18 + 3 * 18 + 13)),
-    ('chest_4', '箱子（4 行）', 'ChestMenu', 'ContainerScreen', {'containerRows': 4},
-     lambda r: grid(8, 18, 9, 4) + std(8, 18 + 4 * 18 + 13)),
-    ('chest_5', '箱子（5 行）', 'ChestMenu', 'ContainerScreen', {'containerRows': 5},
-     lambda r: grid(8, 18, 9, 5) + std(8, 18 + 5 * 18 + 13)),
     ('chest_6', '箱子（6 行）', 'ChestMenu', 'ContainerScreen', {'containerRows': 6},
      lambda r: grid(8, 18, 9, 6) + std(8, 18 + 6 * 18 + 13)),
 
@@ -152,8 +151,6 @@ TITLE_KEYS = {
     'chest_1': 'container.chest',
     'chest_2': 'container.chest',
     'chest_3': 'container.chest',
-    'chest_4': 'container.chestDouble',
-    'chest_5': 'container.chestDouble',
     'chest_6': 'container.chestDouble',
     'shulker_box': 'container.shulkerBox',
     'hopper': 'container.hopper',
@@ -177,9 +174,13 @@ TITLE_KEYS = {
 }
 
 
-def load_lang():
-    """读英文语言文件。缺了就把标题留空，不编造。"""
-    path = os.path.join(ROOT, 'mc-assets', VERSION, 'lang', 'en_us.json')
+def load_lang(code='en_us'):
+    """读语言文件。缺了就把标题留空，不编造。
+
+    @why 标题要出中英两份：中文是默认显示，英文必须留着——做视频的人经常要
+          还原官方截图，英文原版标题不能丢。
+    """
+    path = os.path.join(ROOT, 'mc-assets', VERSION, 'lang', f'{code}.json')
     if not os.path.exists(path):
         return {}
     with open(path, encoding='utf-8') as handle:
@@ -507,6 +508,7 @@ def main():
     containers = []
     problems = []
     lang = load_lang()
+    lang_zh = load_lang('zh_cn')
     for cid, title, menu, screen, env, layout in CONTAINERS:
         menu_src = read_class(menu)
         screen_src = read_class(screen)
@@ -546,6 +548,8 @@ def main():
             'draws': info['draws'],
             'titleText': lang.get(TITLE_KEYS.get(cid, ''), ''),
             'labelText': lang.get('container.inventory', ''),
+            'titleTextZh': lang_zh.get(TITLE_KEYS.get(cid, ''), ''),
+            'labelTextZh': lang_zh.get('container.inventory', ''),
             'title': {'x': info['labels']['titleLabelX'], 'y': info['labels']['titleLabelY']},
             'inventoryLabel': {'x': info['labels']['inventoryLabelX'],
                                'y': info['labels']['inventoryLabelY']},

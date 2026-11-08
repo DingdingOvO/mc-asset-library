@@ -51,6 +51,8 @@ function Workshop({ version }: { version: string }) {
   const [selected, setSelected] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [backdrop, setBackdrop] = useState<ExportBackdrop>('transparent')
+  // @why 默认中文：站点是给中文用户做视频用的。做官方截图还原时切回英文原版
+  const [lang, setLang] = useState<'zh' | 'en'>('zh')
   const [busy, setBusy] = useState(false)
   const [note, setNote] = useState<string | null>(null)
 
@@ -112,7 +114,7 @@ function Workshop({ version }: { version: string }) {
     setBusy(true)
     setNote(null)
     try {
-      const blob = await exportWorkspacePng(state, defs, version, scale, backdrop, textureOf)
+      const blob = await exportWorkspacePng(state, defs, version, scale, backdrop, textureOf, lang)
       if (!blob) {
         setNote('导出失败：画布里没有可绘制的容器')
         return
@@ -203,6 +205,18 @@ function Workshop({ version }: { version: string }) {
             </button>
           ))}
         </div>
+        <div className="workbench__group" role="group" aria-label="标题语言">
+          {(['zh', 'en'] as const).map((value) => (
+            <button
+              key={value}
+              type="button"
+              className={`chip${lang === value ? ' chip--on' : ''}`}
+              onClick={() => setLang(value)}
+            >
+              {value === 'zh' ? '中文' : 'EN'}
+            </button>
+          ))}
+        </div>
         <button type="button" className="btn" onClick={exportPng} disabled={busy}>
           {busy ? '导出中…' : '导出 PNG'}
         </button>
@@ -281,6 +295,7 @@ function Workshop({ version }: { version: string }) {
             scale={scale}
             held={held}
             textureOf={textureOf}
+            lang={lang}
             selected={selected}
             onSelect={setSelected}
             onSlotClick={onSlotClick}
@@ -348,6 +363,8 @@ interface StageProps {
   scale: number
   held: PlacedItem | null
   textureOf: (id: string) => string | undefined
+  /** 容器标题语言，面板与导出一致 */
+  lang: 'zh' | 'en'
   selected: string | null
   onSelect: (uid: string | null) => void
   onSlotClick: (uid: string, slot: number) => void
@@ -365,6 +382,7 @@ function Stage({
   scale,
   held,
   textureOf,
+  lang,
   selected,
   onSelect,
   onSlotClick,
@@ -446,6 +464,7 @@ function Stage({
               selected={active}
               onSlotClick={(slot) => onSlotClick(node.uid, slot)}
               onSlotContext={(slot) => onSlotContext(node.uid, slot)}
+              lang={lang}
             />
             {active && (
               <div className="stage__tools" onPointerDown={(event) => event.stopPropagation()}>

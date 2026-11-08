@@ -49,6 +49,10 @@ export default function Home() {
       <div className="hero">
         <div>
           <h1 className="hero__title">Minecraft 素材库</h1>
+          <p className="hero__lead">
+            做视频用的。模型在站内直接渲染、动画直接播放，不用开游戏对着看。
+            需要成图时，把界面摆出来、物品放进去，导出 PNG。
+          </p>
           <div className="hero__meta">
             {version && <span className="badge">Java {version}</span>}
             <span className="stat">
@@ -89,7 +93,7 @@ export default function Home() {
               label="方块"
               count={blockCount}
               unit="个"
-              desc="按 blockstates 与模型 JSON 渲染的立体形态"
+              desc="按 blockstates 与模型渲染，火、水、岩浆的动画贴图按 frametime 走"
               icon={<CubeIcon />}
             />
             <Entry
@@ -105,59 +109,20 @@ export default function Home() {
               label="生物"
               count={entityCount}
               unit="个"
-              desc="按游戏骨骼与 setupAnim 实时摆姿势"
+              desc="按游戏骨骼与步态公式实时动作，详情里持续循环播放"
               icon={<CubeIcon />}
             />
             <Entry
               to="/ui"
-              label="界面"
+              label="界面工作台"
               count={guiCount}
-              unit="张"
-              desc="GUI 贴图：容器、按钮、图标"
+              unit="张底图"
+              desc="摆容器、放物品、导出成图——布局全部取自反编译源码"
               icon={<ListIcon />}
             />
           </div>
 
-          <div className="section-title">
-            注册表
-            <Link to="/data" className="section-link">
-              数据总览 →
-            </Link>
-          </div>
-          <div className="cat-grid">
-            {summary
-              .filter(
-                (entry) =>
-                  entry.kind !== 'asset' && !['items', 'blocks', 'entities'].includes(entry.id),
-              )
-              .map((entry) => (
-                <Link key={entry.id} to={entry.route} className="cat-card">
-                  <span className="cat-card__text">
-                    <span className="cat-card__name">{entry.label}</span>
-                    <span className="cat-card__count">{entry.count} 条</span>
-                  </span>
-                </Link>
-              ))}
-          </div>
-
-          <div className="section-title">
-            资源文件
-            <span className="section-note">资源包里的目录 · 不是注册表</span>
-          </div>
-          <div className="cat-grid">
-            {summary
-              .filter((entry) => entry.kind === 'asset' && entry.id !== 'sounds')
-              .map((entry) => (
-                <Link key={entry.id} to={entry.route} className="cat-card">
-                  <span className="cat-card__text">
-                    <span className="cat-card__name">{entry.label}</span>
-                    <span className="cat-card__count">{entry.count} 个文件</span>
-                  </span>
-                </Link>
-              ))}
-          </div>
-
-          <div className="section-title">其他</div>
+          <div className="section-title">素材片段</div>
           <div className="cat-grid">
             <Link to="/particles" className="cat-card">
               <span className="cat-card__thumb cat-card__thumb--icon" aria-hidden="true">
@@ -165,7 +130,7 @@ export default function Home() {
               </span>
               <span className="cat-card__text">
                 <span className="cat-card__name">粒子效果</span>
-                <span className="cat-card__count">115 个 · 尺寸取自源码</span>
+                <span className="cat-card__count">尺寸取自源码</span>
               </span>
             </Link>
             <Link to="/sounds" className="cat-card">
@@ -173,7 +138,7 @@ export default function Home() {
                 <SoundIcon />
               </span>
               <span className="cat-card__text">
-                <span className="cat-card__name">音效库</span>
+                <span className="cat-card__name">音效</span>
                 <span className="cat-card__count">{soundCount} 个 · 可试听</span>
               </span>
             </Link>
@@ -187,6 +152,27 @@ export default function Home() {
               </span>
             </Link>
           </div>
+
+          {/* @why 注册表和历史沿革相关的东西不该占首屏：做视频的人关心的是画面，
+              不是 1288 条 block id 的注册表结构。收进折叠区，需要查的时候点开。 */}
+          <details className="more">
+            <summary className="more__head">
+              注册表与资源文件
+              <span className="more__note">数据总览、按目录的文件清单</span>
+            </summary>
+            <div className="cat-grid more__body">
+              {summary.map((entry) => (
+                <Link key={entry.id} to={entry.route} className="cat-card">
+                  <span className="cat-card__text">
+                    <span className="cat-card__name">{entry.label}</span>
+                    <span className="cat-card__count">
+                      {entry.count} {entry.kind === 'asset' ? '个文件' : '条'}
+                    </span>
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </details>
         </>
       )}
     </div>

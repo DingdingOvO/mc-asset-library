@@ -364,7 +364,12 @@ export function ModelView({
        * @constraint 会动的方块不能走缩略图缓存：缓存键里没有时间，
        *      第一次画出来那一帧会被永久记住，滚动回来永远是同一帧。
        */
-      const cacheKey = interactive || blockAnim
+      /**
+       * @constraint 会动的必须跳过缓存。缓存键里只有纹理、角度和光照，没有时间：
+       *      第一次画出来那一帧会被永久记住。以前只排除了 blockAnim，实体卡片
+       *      悬停播放时每一帧都命中缓存，看起来"打开了动画但完全没动"。
+       */
+      const cacheKey = interactive || blockAnim || animatedLive.current
         ? null
         : `t|${textureKey}|${pixels}|${Math.round(spin.current.rx)}|${Math.round(spin.current.ry)}|${Math.round((live?.light ?? 1) * 100)}|${Math.round((live?.zoom ?? 1) * 100)}`
       if (cacheKey) {
@@ -517,7 +522,13 @@ export function ModelView({
       }
       clock.current = 0.48
       draw()
-      if (!blockAnim) return
+      /**
+       * @constraint 实体卡片也要走到订阅那一步：以前这里 `if (!blockAnim) return`
+       *      直接退出，animated 只对详情页生效，于是生物列表是九十张静止的模型。
+       *      悬停时 animated 变 true 会重建这个 effect，但纹理与光栅化结果都有缓存，
+       *      重建本身只多画一帧。
+       */
+      if (!blockAnim && !animatedLive.current) return
 
       /**
        * 只让真正在视口里的卡片订阅共享时钟。

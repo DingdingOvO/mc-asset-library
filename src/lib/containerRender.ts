@@ -95,6 +95,7 @@ export async function exportWorkspacePng(
   scale: number,
   backdrop: ExportBackdrop,
   textureOf: (itemId: string) => string | undefined,
+  lang: 'zh' | 'en' = 'zh',
 ): Promise<Blob | null> {
   const bounds = workspaceBounds(workspace, defs)
   if (!bounds) return null
@@ -144,8 +145,10 @@ export async function exportWorkspacePng(
     paintContainer(ctx, image, def, 0, 0)
     // 标题与背包标签跟背景同一套 GUI 坐标，必须画在同一个变换里
     if (font) {
-      drawText(ctx, font, def.titleText, def.title.x, def.title.y, '#404040')
-      drawText(ctx, font, def.labelText, def.inventoryLabel.x, def.inventoryLabel.y, '#404040')
+      const title = lang === 'zh' ? def.titleTextZh || def.titleText : def.titleText
+      const label = lang === 'zh' ? def.labelTextZh || def.labelText : def.labelText
+      drawText(ctx, font, title, def.title.x, def.title.y, '#404040')
+      drawText(ctx, font, label, def.inventoryLabel.x, def.inventoryLabel.y, '#404040')
     }
     ctx.restore()
 

@@ -166,6 +166,13 @@ function EntityBrowser({ version }: { version: string }) {
    *      subject 是 ModelView 的 effect 依赖，每次 render 新建一个对象
    *      就等于让 96 张卡片重新光栅化一遍，滚动时整页卡死。
    */
+  /**
+   * 鼠标停在哪张卡片上。
+   * @why 列表里九十多只生物同时按 20fps 重绘会把主线程占满。同一时刻只有一张
+   *      卡片在动，代价可以忽略，而且"扫过去会动"正好能看出模型的走路姿态。
+   */
+  const [hovered, setHovered] = useState<string | null>(null)
+
   const defaultSubjects = useMemo(() => {
     const map = new Map<string, Subject>()
     for (const [id, hit] of prepared) {
@@ -252,6 +259,8 @@ function EntityBrowser({ version }: { version: string }) {
               className="tex-cell"
               aria-pressed={selected?.id === entry.id}
               title={`${entry.n}\n${entry.id}`}
+              onPointerEnter={() => setHovered(entry.id)}
+              onPointerLeave={() => setHovered((value) => (value === entry.id ? null : value))}
               onClick={() => setSelected(entry)}
             >
               {hit && hit.texture ? (
@@ -259,7 +268,8 @@ function EntityBrowser({ version }: { version: string }) {
                   subject={defaultSubjects.get(entry.id)!}
                   version={version}
                   size={68}
-                  speed={0}
+                  speed={hovered === entry.id ? 1 : 0}
+                  animated={hovered === entry.id}
                 />
               ) : entry.i ? (
                 <img

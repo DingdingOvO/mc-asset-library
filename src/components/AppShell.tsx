@@ -45,7 +45,7 @@ export function AppShell() {
       </main>
       <footer className="footer">
         <span>
-          素材版权归 Mojang Studios 与 Microsoft 所有，本站仅用于资源包开发与学习参考，非官方站点。
+          素材版权归 Mojang Studios 与 Microsoft 所有，本站为视频制作与学习提供素材参考，非官方站点。
         </span>
         <span className="footer__build">构建 {__BUILD_TIME__.slice(0, 16).replace('T', ' ')}</span>
       </footer>

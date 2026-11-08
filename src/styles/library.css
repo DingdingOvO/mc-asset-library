@@ -24,6 +24,14 @@
   letter-spacing: -0.02em;
 }
 
+.hero__lead {
+  max-width: 46em;
+  margin: 8px 0 0;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--text-muted);
+}
+
 .hero__meta {
   display: flex;
   flex-wrap: wrap;
@@ -2173,4 +2181,49 @@
   .workbench__stage {
     padding: 10px;
   }
+}
+
+
+/* 首页折叠区：注册表与资源文件 */
+.more {
+  margin-top: 28px;
+  border-top: 1px solid var(--border);
+}
+
+.more__head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding: 12px 2px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  cursor: pointer;
+  list-style: none;
+}
+
+.more__head::-webkit-details-marker {
+  display: none;
+}
+
+.more__head::after {
+  content: "展开";
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--accent);
+}
+
+.more[open] .more__head::after {
+  content: "收起";
+}
+
+.more__note {
+  font-size: 12px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.more__body {
+  padding-bottom: 8px;
 }

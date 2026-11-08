@@ -16,6 +16,7 @@
     "assets": "node scripts/assets.mjs",
     "verify": "node scripts/assets.mjs verify",
     "containers": "python3 scripts/extract-containers.py",
+    "fonts": "python3 scripts/extract-font-zh.py",
     "typecheck": "tsc -b",
     "pages:build": "VITE_BASE=/$(basename $PWD)/ pnpm build && node scripts/assets.mjs pack --out=dist-site"
   },

@@ -18,6 +18,8 @@ interface ContainerPanelProps {
   onSlotContext?: (slot: number) => void
   interactive?: boolean
   selected?: boolean
+  /** 标题语言。中文走 unifont 点阵，没有对应字形时自动退回英文 */
+  lang?: 'zh' | 'en'
   className?: string
 }
 
@@ -58,6 +60,7 @@ export function ContainerPanel({
   onSlotContext,
   interactive = true,
   selected = false,
+  lang = 'zh',
   className,
 }: ContainerPanelProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
@@ -106,15 +109,20 @@ export function ContainerPanel({
 
   // @why 标题用位图字体渲成 data URL 而不是 HTML 文字：面板整体要按 3 倍缩放，
   //      系统字体在 8px 下渲染再放大会糊边，和背景的像素风格也对不上。
+  // @constraint 中文缺失时退回英文，而不是显示一排问号：zh_cn.json 里
+  //      个别键可能是空的，宁可显示原文也不要交出乱码。
+  const titleText = lang === 'zh' ? def.titleTextZh || def.titleText : def.titleText
+  const labelText = lang === 'zh' ? def.labelTextZh || def.labelText : def.labelText
+
   const titleUrl = useMemo(() => {
     if (!font) return null
-    return renderLine(font, def.titleText, '#404040')?.toDataURL() ?? null
-  }, [font, def.titleText])
+    return renderLine(font, titleText, '#404040')?.toDataURL() ?? null
+  }, [font, titleText])
 
   const labelUrl = useMemo(() => {
     if (!font) return null
-    return renderLine(font, def.labelText, '#404040')?.toDataURL() ?? null
-  }, [font, def.labelText])
+    return renderLine(font, labelText, '#404040')?.toDataURL() ?? null
+  }, [font, labelText])
 
   return (
     <div
