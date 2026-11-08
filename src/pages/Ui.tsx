@@ -329,7 +329,9 @@ function Workshop({ version }: { version: string }) {
             ))}
           </div>
           <p className="workbench__hint workbench__hint--held">
-            {held ? `手上：${held.id} × ${held.count}` : '点物品拿在手上，再点槽位放下'}
+            {held
+              ? `${itemMap.get(held.id)?.n ?? held.id} × ${held.count} · 点格子放下，右键格子清空`
+              : '① 点物品拿在手上　② 点格子放下'}
           </p>
           <div className="item-grid">
             {items.loading && <p className="empty">读取中…</p>}
