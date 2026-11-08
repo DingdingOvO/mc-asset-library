@@ -11,10 +11,12 @@ import Registry from '@/pages/Registry'
 import NotFound from '@/pages/NotFound'
 import Sounds from '@/pages/Sounds'
 import Particles from '@/pages/Particles'
+import { useCursors } from '@/lib/useCursors'
 
 export default function App() {
   // @constraint React Router 的 basename 不能带结尾斜杠，__SITE_BASE__ 一定带
   const basename = __SITE_BASE__.replace(/\/$/, '') || '/'
+  useCursors()
 
   return (
     <BrowserRouter basename={basename}>

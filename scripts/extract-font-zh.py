@@ -40,8 +40,29 @@ def load_lang(name):
 
 
 def wanted_text(lang):
-    """取出所有会画到界面上的文案。"""
-    return [value for key, value in lang.items() if key.startswith(KEY_PREFIXES)]
+    """取出所有会画到界面上的文案。
+
+    @why 除了语言文件里 container./merchant. 开头的键，还要把 containers.json
+          里动态层的文案一起收进来：信标的 Primary/Secondary 标题和铁砧的
+          "附魔花费"不在那两个前缀下，漏掉就会在面板上渲染成一排问号。
+    @constraint 依赖 extract-containers.py 先跑。顺序写在 package.json 的
+          fonts 脚本里，这里不再自行推导。
+    """
+    out = [value for key, value in lang.items() if key.startswith(KEY_PREFIXES)]
+
+    derived = os.path.join(DERIVED, 'containers.json')
+    if os.path.exists(derived):
+        with open(derived, encoding='utf-8') as handle:
+            data = json.load(handle)
+        for container in data.get('containers', []):
+            for key in ('titleTextZh', 'labelTextZh'):
+                if container.get(key):
+                    out.append(container[key])
+            for layer in container.get('layers', []):
+                for key in ('textZh', 'costZh', 'expensiveZh'):
+                    if layer.get(key):
+                        out.append(layer[key])
+    return out
 
 
 def read_hex(zip_path):

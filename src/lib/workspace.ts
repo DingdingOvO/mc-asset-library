@@ -1,3 +1,5 @@
+import type { ParamValue } from './containers'
+
 /**
  * 工作区模型：一张画布上摆着若干容器，每个容器的每个格子可以放物品。
  *
@@ -23,6 +25,12 @@ export interface ContainerNode {
   y: number
   /** 槽位下标 → 物品。下标就是 addSlot 顺序，提取时已固定 */
   items: Record<number, PlacedItem>
+  /**
+   * 可变状态：燃烧进度、信标等级、主副效果、快捷栏选中格…
+   * @why 容器不只是"格子 + 物品"。熔炉有没有在烧、信标几级点亮了哪排效果，
+   *      都直接决定截出来的图对不对。缺省值来自 def.controls。
+   */
+  params: Record<string, ParamValue>
 }
 
 export interface Workspace {
@@ -30,12 +38,13 @@ export interface Workspace {
 }
 
 export type WorkspaceAction =
-  | { type: 'add'; container: string; x: number; y: number; uid: string }
+  | { type: 'add'; container: string; x: number; y: number; uid: string; params: Record<string, ParamValue> }
   | { type: 'move'; uid: string; x: number; y: number }
   | { type: 'remove'; uid: string }
   | { type: 'front'; uid: string }
   | { type: 'clone'; uid: string; nextUid: string }
   | { type: 'put'; uid: string; slot: number; item: PlacedItem }
+  | { type: 'param'; uid: string; key: string; value: ParamValue }
   | { type: 'take'; uid: string; slot: number }
   | { type: 'load'; workspace: Workspace }
   | { type: 'clear' }
@@ -48,7 +57,14 @@ export function workspaceReducer(state: Workspace, action: WorkspaceAction): Wor
       return {
         nodes: [
           ...state.nodes,
-          { uid: action.uid, container: action.container, x: action.x, y: action.y, items: {} },
+          {
+            uid: action.uid,
+            container: action.container,
+            x: action.x,
+            y: action.y,
+            items: {},
+            params: action.params,
+          },
         ],
       }
     case 'move':
@@ -78,6 +94,7 @@ export function workspaceReducer(state: Workspace, action: WorkspaceAction): Wor
             x: target.x + 12,
             y: target.y + 12,
             items: { ...target.items },
+            params: { ...target.params },
           },
         ],
       }
@@ -87,6 +104,14 @@ export function workspaceReducer(state: Workspace, action: WorkspaceAction): Wor
         nodes: state.nodes.map((node) =>
           node.uid === action.uid
             ? { ...node, items: { ...node.items, [action.slot]: action.item } }
+            : node,
+        ),
+      }
+    case 'param':
+      return {
+        nodes: state.nodes.map((node) =>
+          node.uid === action.uid
+            ? { ...node, params: { ...node.params, [action.key]: action.value } }
             : node,
         ),
       }
@@ -109,13 +134,19 @@ export function workspaceReducer(state: Workspace, action: WorkspaceAction): Wor
 }
 
 const FORMAT = 'mc-asset-library/workspace'
-const FORMAT_VERSION = 1
+const FORMAT_VERSION = 2
 
 export interface WorkspaceFile {
   format: string
   version: number
   source: string
-  nodes: { container: string; x: number; y: number; items: Record<string, PlacedItem> }[]
+  nodes: {
+    container: string
+    x: number
+    y: number
+    items: Record<string, PlacedItem>
+    params?: Record<string, ParamValue>
+  }[]
 }
 
 export function serialize(workspace: Workspace, source: string): WorkspaceFile {
@@ -131,6 +162,7 @@ export function serialize(workspace: Workspace, source: string): WorkspaceFile {
       items: Object.fromEntries(
         Object.entries(node.items).map(([slot, item]) => [slot, { id: item.id, count: item.count }]),
       ),
+      params: node.params,
     })),
   }
 }
@@ -152,12 +184,21 @@ export function deserialize(raw: unknown, newUid: () => string): Workspace | nul
       const count = Math.max(1, Math.min(99, Math.round(Number(value.count) || 1)))
       items[index] = { id: value.id, count }
     }
+    // @constraint 旧文件（version 1）没有 params，这里留空对象；
+    //      调用方按 def.controls 的默认值补齐，不要在这一层猜容器结构。
+    const params: Record<string, ParamValue> = {}
+    for (const [key, value] of Object.entries(entry.params ?? {})) {
+      if (typeof value === 'number' || typeof value === 'boolean' || typeof value === 'string') {
+        params[key] = value
+      }
+    }
     nodes.push({
       uid: newUid(),
       container: entry.container,
       x: Math.round(Number(entry.x) || 0),
       y: Math.round(Number(entry.y) || 0),
       items,
+      params,
     })
   }
   return { nodes }

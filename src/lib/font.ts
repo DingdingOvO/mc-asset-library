@@ -211,6 +211,9 @@ export function textWidth(font: GlyphFont, text: string): number {
 
 /**
  * 画一行字。坐标是 GUI 像素，(x, y) 是文字**左上角**，与 GuiGraphics.text 一致。
+ *
+ * @param shadow 原版 text 默认带投影，颜色是原色的 1/4 亮度。信标那种
+ *        浅底浅字的标题全靠投影才分得清笔画，所以默认关、需要时开。
  */
 export function drawText(
   ctx: CanvasRenderingContext2D,
@@ -219,7 +222,13 @@ export function drawText(
   x: number,
   y: number,
   color = '#404040',
+  shadow = false,
 ): void {
+  if (shadow) {
+    const [r, g, b] = parseColor(color)
+    const dark = `#${[r, g, b].map((v) => Math.floor(v / 4).toString(16).padStart(2, '0')).join('')}`
+    drawText(ctx, font, text, x + 1, y + 1, dark, false)
+  }
   const sheet = atlas(font, color)
   const cellW = font.image.naturalWidth / GRID
   const cellH = font.image.naturalHeight / GRID

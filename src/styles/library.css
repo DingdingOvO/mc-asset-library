@@ -1676,7 +1676,57 @@
 }
 
 /* ============================================================
-   界面工作台：把容器摆到画布上、放物品、导出
+   全局光标
+   @why 用自己仓库里的 Android 指针，而不是系统箭头：整站是像素风，
+        系统箭头带抗锯齿，压在上面很跳。
+   @constraint 变量由 src/lib/useCursors.ts 在挂载时写入（含热点），
+        这里只做引用与回退；变量没就绪时后面的 default 顶上。
+   ============================================================ */
+
+/* @constraint 只给不可点的容器：把 .palette__item 放进来会盖掉下面的
+   button 规则（类选择器特异性高于元素选择器），按钮上就变成普通箭头了 */
+body,
+.stage {
+  cursor: var(--cur-arrow, default);
+}
+
+a,
+button,
+summary,
+[role='button'],
+.chip,
+.item-chip,
+.menu__list button {
+  cursor: var(--cur-hand, pointer);
+}
+
+input,
+textarea,
+select,
+.stack__input {
+  cursor: var(--cur-text, text);
+}
+
+button:disabled,
+.btn:disabled {
+  cursor: var(--cur-nodrop, not-allowed);
+}
+
+.stage__node {
+  cursor: var(--cur-grab, grab);
+}
+
+.stage--dragging .stage__node,
+.stage--dragging .stage__node--active {
+  cursor: var(--cur-grabbing, grabbing);
+}
+
+.mc-slot {
+  cursor: var(--cur-cross, crosshair);
+}
+
+/* ============================================================
+   界面工作台
    @why 这一页的坐标系是 GUI 像素（176×166 这类），缩放整体做一次
         transform。所有尺寸都按游戏原值写，不要在这里乘缩放系数。
    ============================================================ */
@@ -1685,21 +1735,22 @@
   display: flex;
   flex-direction: column;
   height: calc(100dvh - var(--topbar-h));
-  min-height: 480px;
+  min-height: 420px;
 }
 
 .workbench__bar {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex-wrap: wrap;
-  padding: 10px 16px;
+  padding: 8px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--surface);
 }
 
 .workbench__back {
   font-size: 13px;
+  white-space: nowrap;
 }
 
 .workbench__title {
@@ -1707,16 +1758,19 @@
   font-size: 15px;
   font-weight: 650;
   letter-spacing: -0.01em;
+  white-space: nowrap;
 }
 
 .workbench__meta {
   font-size: 12px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
+  white-space: nowrap;
 }
 
 .workbench__spacer {
   flex: 1;
+  min-width: 4px;
 }
 
 .workbench__group {
@@ -1732,7 +1786,7 @@
   align-items: center;
   gap: 8px;
   margin: 0;
-  padding: 8px 16px;
+  padding: 7px 16px;
   font-size: 13px;
   color: var(--accent-contrast);
   background: var(--accent);
@@ -1744,7 +1798,6 @@
   background: none;
   color: inherit;
   font-size: 16px;
-  cursor: pointer;
   line-height: 1;
 }
 
@@ -1752,7 +1805,7 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 208px minmax(0, 1fr) 244px;
+  grid-template-columns: 190px minmax(0, 1fr) 236px;
 }
 
 .workbench__side {
@@ -1760,22 +1813,25 @@
   flex-direction: column;
   gap: 8px;
   min-height: 0;
-  padding: 12px;
-  border-right: 1px solid var(--border);
+  padding: 10px;
   background: var(--surface);
   overflow: auto;
 }
 
+.workbench__side--left {
+  border-right: 1px solid var(--border);
+}
+
 .workbench__side--right {
-  border-right: 0;
   border-left: 1px solid var(--border);
 }
 
 .workbench__section {
   margin: 0;
-  font-size: 12px;
+  padding: 0 2px;
+  font-size: 11px;
   font-weight: 650;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
   color: var(--text-muted);
 }
@@ -1783,19 +1839,25 @@
 .workbench__hint {
   margin: 0;
   font-size: 12px;
-  line-height: 1.5;
+  line-height: 1.45;
   color: var(--text-muted);
 }
 
 .workbench__hint--held {
-  min-height: 36px;
+  min-height: 34px;
   padding: 6px 8px;
   border-radius: var(--radius-sm);
   background: var(--surface-muted);
   font-variant-numeric: tabular-nums;
 }
 
+.workbench__hint--wide {
+  grid-column: 1 / -1;
+}
+
 .workbench__link {
+  margin-top: auto;
+  padding-top: 6px;
   font-size: 12px;
   color: var(--accent);
   text-decoration: none;
@@ -1805,29 +1867,24 @@
   text-decoration: underline;
 }
 
-.workbench__hint--wide {
-  grid-column: 1 / -1;
-}
-
-/* 容器调色板 */
+/* 容器分组 */
 .palette {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 3px;
 }
 
 .palette__item {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
-  gap: 8px;
-  padding: 7px 9px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  gap: 6px;
+  padding: 6px 8px;
+  border: 1px solid transparent;
+  border-radius: 5px;
   background: var(--surface-muted);
   color: var(--text);
   text-align: left;
-  cursor: pointer;
   transition: border-color 0.12s, background 0.12s;
 }
 
@@ -1836,34 +1893,173 @@
   background: var(--accent-muted);
 }
 
+.palette__item--hero {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
+.palette__item--hero:hover {
+  background: var(--accent);
+  border-color: var(--accent-contrast);
+}
+
 .palette__name {
-  font-size: 13px;
+  font-size: 12.5px;
   font-weight: 550;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .palette__meta {
-  font-size: 11px;
+  font-size: 10.5px;
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
 
+.palette__item--hero .palette__meta {
+  color: inherit;
+  opacity: 0.8;
+}
+
+/* 数量输入 */
+.stack {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.stack__label {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.stack__input {
+  width: 64px;
+  padding: 5px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font: 600 13px/1.2 var(--font-mono);
+  text-align: center;
+}
+
+.stack__input:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+.stack__hint {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+/* 导出下拉 */
+.menu {
+  position: relative;
+}
+
+.menu > summary {
+  list-style: none;
+}
+
+.menu > summary::-webkit-details-marker {
+  display: none;
+}
+
+.menu__list {
+  position: absolute;
+  right: 0;
+  top: calc(100% + 4px);
+  z-index: 60;
+  min-width: 208px;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: 0 12px 32px rgb(0 0 0 / 18%);
+}
+
+.menu__list button {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+  text-align: left;
+}
+
+.menu__list button span {
+  font-size: 11.5px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.menu__list button:hover {
+  background: var(--surface-muted);
+}
+
+.menu__list button:disabled {
+  opacity: 0.5;
+}
+
+.menu__split {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  margin-top: 4px;
+  padding: 4px 8px 2px;
+  border-top: 1px solid var(--border);
+}
+
+.menu__label {
+  margin-right: auto;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.menu__split .chip {
+  padding: 3px 7px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.menu__split .chip--on {
+  background: var(--accent);
+  color: var(--accent-contrast);
+}
+
 /* 画布 */
+.workbench__center {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+}
+
 .workbench__stage {
+  flex: 1;
   min-width: 0;
   min-height: 0;
   overflow: auto;
   /* @why 用 grid 而不是普通块：块级子元素在 overflow 容器里拿不到容器高度，
-     `.stage { min-height: 100% }` 会塌成 0，空状态提示被推到画布正中间，
-     用户不滚动就永远看不到。grid 子项默认 stretch，配合 min-width/min-height
-     既能撑满视口又能被内容撑大。 */
+     `.stage { min-height: 100% }` 会塌成 0，空状态提示被推到画布正中间。 */
   display: grid;
-  padding: 16px;
+  padding: 14px;
   background:
     linear-gradient(var(--border) 1px, transparent 1px) 0 0 / 24px 24px,
     linear-gradient(90deg, var(--border) 1px, transparent 1px) 0 0 / 24px 24px,
     var(--bg);
-  background-blend-mode: normal;
 }
 
 .stage {
@@ -1875,8 +2071,8 @@
 }
 
 .stage__empty {
-  /* @constraint 不能写 inset: 24px —— 画布的最小高度是内容撑出来的（3 倍缩放下
-     一千多像素），空状态居中会跑到首屏以外，用户看到的就是一张空白网格。 */
+  /* @constraint 不能写 inset: 24px —— 画布最小高度由内容撑出来（3 倍缩放下
+     一千多像素），居中会落到首屏之外，用户看到的就是一张空白网格。 */
   position: absolute;
   left: 24px;
   right: 24px;
@@ -1884,9 +2080,10 @@
   height: 168px;
   display: grid;
   place-content: center;
-  gap: 6px;
+  gap: 4px;
+  padding: 16px;
   text-align: center;
-  font-size: 13px;
+  font-size: 12.5px;
   color: var(--text-muted);
   border: 1px dashed var(--border-strong);
   border-radius: var(--radius-lg);
@@ -1897,14 +2094,19 @@
   margin: 0;
 }
 
+.stage__empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
 .stage__node {
   position: absolute;
   touch-action: none;
-  cursor: grab;
 }
 
 .stage__node--active {
-  cursor: grabbing;
+  z-index: 2;
 }
 
 .stage__tools {
@@ -1936,11 +2138,117 @@
   background: rgb(255 255 255 / 18%);
   color: inherit;
   font-size: 11px;
-  cursor: pointer;
 }
 
 .stage__tools button:hover {
   background: rgb(255 255 255 / 32%);
+}
+
+/* 状态面板 */
+/* @constraint 状态条是画布上方的一行，不是浮在画布上的卡片。浮层会盖住
+   容器左下角——那正好是熔炉火焰和酿造气泡的位置，调参数时看不见效果。 */
+.state {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 16px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.state__head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-right: 4px;
+  border-right: 1px solid var(--border);
+}
+
+.state__title {
+  font-size: 12.5px;
+  font-weight: 650;
+}
+
+.state__toggle {
+  display: flex;
+  flex: 1;
+  align-items: baseline;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--text);
+  text-align: left;
+}
+
+.state__chevron {
+  font-size: 11px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.state__close {
+  margin-left: auto;
+  border: 0;
+  background: none;
+  color: var(--text-muted);
+  font-size: 15px;
+  line-height: 1;
+}
+
+.state__hint {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.state__value {
+  min-width: 34px;
+  text-align: right;
+}
+
+.state__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.state__row--check {
+  display: flex;
+  gap: 7px;
+}
+
+.state__row--check input {
+  accent-color: var(--accent);
+}
+
+.state__label {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+.state__range {
+  width: 92px;
+  accent-color: var(--accent);
+}
+
+.state__value {
+  font: 600 11.5px/1 var(--font-mono);
+  color: var(--text);
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.state__select {
+  padding: 3px 6px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background: var(--bg);
+  color: var(--text);
+  font-size: 12px;
 }
 
 /* 容器面板 */
@@ -1988,7 +2296,6 @@
   padding: 0;
   border: 0;
   background: none;
-  cursor: pointer;
   border-radius: 1px;
 }
 
@@ -2021,7 +2328,7 @@
   height: 8px;
   width: auto;
   image-rendering: pixelated;
-  /* @why 游戏里的堆叠数字带 1 像素右下投影，纯白字压在浅色木头上会看不清 */
+  /* @why 堆叠数字带 1 像素右下投影，纯白字压在浅色木头上会看不清 */
   filter: drop-shadow(1px 1px 0 #3f3f3f);
   pointer-events: none;
 }
@@ -2034,10 +2341,10 @@
   pointer-events: none;
 }
 
-/* 物品栏 */
+/* 物品网格 */
 .item-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(88px, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(84px, 1fr));
   gap: 3px;
   align-content: start;
 }
@@ -2053,7 +2360,6 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  cursor: pointer;
 }
 
 .item-chip:hover {
@@ -2075,7 +2381,6 @@
   color: var(--text-muted);
   font-size: 12px;
   font-variant-numeric: tabular-nums;
-  cursor: pointer;
 }
 
 .workbench .chip:hover {
@@ -2089,6 +2394,8 @@
 }
 
 .workbench .btn {
+  display: inline-flex;
+  align-items: center;
   padding: 6px 11px;
   border: 1px solid var(--accent);
   border-radius: var(--radius-sm);
@@ -2096,13 +2403,11 @@
   color: var(--accent-contrast);
   font-size: 12px;
   font-weight: 550;
-  cursor: pointer;
   white-space: nowrap;
 }
 
 .workbench .btn:disabled {
   opacity: 0.55;
-  cursor: progress;
 }
 
 .workbench .btn--ghost {
@@ -2115,115 +2420,177 @@
   border-color: var(--border-strong);
 }
 
+.workbench .btn--danger {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: #fff;
+}
+
+/* 悬停提示 */
+.mc-tip {
+  position: fixed;
+  z-index: 200;
+  display: grid;
+  gap: 1px;
+  padding: 1px 2px;
+  border: 10px solid transparent;
+  border-image: var(--tip-frame) 10 fill / 10px stretch;
+  image-rendering: pixelated;
+  pointer-events: none;
+}
+
+/* @constraint 原版是把 background 和 frame blit 到同一个矩形（不是嵌套），
+   所以 inset:-10px 拉回 border box 外沿，再用 9px 的 slice 画底图，
+   比 frame 少一圈，正好落在内侧。 */
+.mc-tip::before {
+  content: '';
+  position: absolute;
+  inset: -10px;
+  z-index: -1;
+  border: 9px solid transparent;
+  border-image: var(--tip-bg) 9 fill / 9px stretch;
+}
+
+.mc-tip__title {
+  font: 600 12.5px/1.3 var(--font-sans);
+  color: #fff;
+  /* @why 游戏里 tooltip 文字带 1 像素投影，去掉之后在浅色背景的提示里发飘 */
+  text-shadow: 1px 1px 0 #3f3f3f;
+}
+
+.mc-tip__note {
+  font: 600 12.5px/1.3 var(--font-sans);
+  color: #c8c8ff;
+  text-shadow: 1px 1px 0 #2a2a4a;
+}
+
+.mc-tip__sub {
+  font: 400 10.5px/1.2 var(--font-mono);
+  color: #9a9ab0;
+}
+
 @keyframes mc-pulse {
   0%, 100% { opacity: 0.5; }
   50% { opacity: 1; }
 }
 
-@media (max-width: 600px) {
-  /* 顶栏在 390px 下把八个入口和主题开关挤成一条，品牌文字先让位 */
-  .topbar__brand {
-    font-size: 0;
-  }
+/* ============================================================
+   窄屏
+   @why 手机上三段横排是不可能的：190 + 236 的侧栏就把 390 宽吃光了。
+        改成纵向堆叠，容器条横滚、物品区限高滚动，画布占中间。
+   ============================================================ */
 
-  .topbar__brand .topbar__mark {
-    font-size: 14px;
-  }
-}
-
-@media (max-width: 960px) {
+@media (max-width: 900px) {
+  /* @constraint 手机上必须锁死整体高度，不能 height:auto。一行 1fr 的网格
+     在高度自由时会被内容撑开——物品区 120 个格子把页面拉到 1963px，
+     用户要滚一千多像素才能看到列表底部。锁高之后由各区块自己滚。 */
   .workbench {
-    height: auto;
+    height: calc(100dvh - var(--topbar-h));
+    min-height: 420px;
+  }
+
+  .workbench__body {
+    min-height: 0;
+  }
+
+  .workbench__bar {
+    gap: 5px;
+    padding: 7px 10px;
+  }
+
+  /* @why 标题、统计、返回在手机上一起去掉：顶栏本来就要折两行，留着它们
+     会把"导出/导入/清空"挤到第三行，画布只剩一半高度。面包屑靠顶部导航
+     的高亮项就够了。 */
+  .workbench__title,
+  .workbench__meta,
+  .workbench__back {
+    display: none;
   }
 
   .workbench__body {
     grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto minmax(320px, 52vh) auto;
+    /* 三行都给定高度：容器条按内容、画布 44vh、剩下全给物品区。
+       用 auto 的话物品区会被挤到屏幕外，要滚到底才能选物品。 */
+    grid-template-rows: auto minmax(220px, 44vh) minmax(150px, 1fr);
   }
 
-  .workbench__side {
+  /* @constraint 状态面板在手机上必须回到普通流。它是 absolute + bottom，
+     浮在画布上会盖掉面板下半截，而那正是要调的熔炉火焰所在的位置。 */
+  .workbench__center {
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .workbench__stage {
+    min-height: 0;
+  }
+
+  .workbench__side--left {
     flex-direction: row;
-    flex-wrap: wrap;
     align-items: center;
-    max-height: none;
+    gap: 6px;
+    padding: 8px 10px;
     border-right: 0;
     border-bottom: 1px solid var(--border);
-    overflow: visible;
+    overflow-x: auto;
+    overflow-y: hidden;
   }
 
-  .workbench__side--right {
-    border-left: 0;
-    border-top: 1px solid var(--border);
-  }
-
-  .workbench__section,
-  .workbench__hint {
-    flex-basis: 100%;
+  .workbench__side--left .workbench__section {
+    display: none;
   }
 
   .palette {
     flex-direction: row;
-    flex-wrap: nowrap;
-    overflow-x: auto;
-    padding-bottom: 4px;
+    flex: 0 0 auto;
   }
 
   .palette__item {
     flex: 0 0 auto;
+    white-space: nowrap;
   }
 
-  .workbench__side .item-grid {
-    width: 100%;
-    max-height: 168px;
-    overflow: auto;
+  .workbench__link {
+    display: none;
   }
 
   .workbench__stage {
     padding: 10px;
   }
+
+  .workbench__side--right {
+    border-left: 0;
+    border-top: 1px solid var(--border);
+    min-height: 0;
+    overflow: auto;
+  }
+
+  .state {
+    gap: 4px 12px;
+    max-height: 30vh;
+    overflow: auto;
+  }
+
+  .state__head {
+    border-right: 0;
+  }
+
+  .item-grid {
+    grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+  }
 }
 
+@media (max-width: 560px) {
+  .workbench__bar {
+    padding: 6px 8px;
+  }
 
-/* 首页折叠区：注册表与资源文件 */
-.more {
-  margin-top: 28px;
-  border-top: 1px solid var(--border);
-}
+  /* 顶栏在 390px 下把六个控件挤成两行，能省的都省掉 */
+  .workbench__back {
+    display: none;
+  }
 
-.more__head {
-  display: flex;
-  align-items: baseline;
-  gap: 10px;
-  padding: 12px 2px;
-  font-size: 13px;
-  font-weight: 600;
-  color: var(--text);
-  cursor: pointer;
-  list-style: none;
-}
-
-.more__head::-webkit-details-marker {
-  display: none;
-}
-
-.more__head::after {
-  content: "展开";
-  margin-left: auto;
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--accent);
-}
-
-.more[open] .more__head::after {
-  content: "收起";
-}
-
-.more__note {
-  font-size: 12px;
-  font-weight: 400;
-  color: var(--text-muted);
-}
-
-.more__body {
-  padding-bottom: 8px;
+  .workbench__body {
+    grid-template-rows: auto minmax(260px, 48vh) auto;
+  }
 }

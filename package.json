@@ -16,11 +16,12 @@
     "assets": "node scripts/assets.mjs",
     "verify": "node scripts/assets.mjs verify",
     "containers": "python3 scripts/extract-containers.py",
-    "fonts": "python3 scripts/extract-font-zh.py",
+    "fonts": "python3 scripts/extract-containers.py && python3 scripts/extract-font-zh.py",
     "typecheck": "tsc -b",
     "pages:build": "VITE_BASE=/$(basename $PWD)/ pnpm build && node scripts/assets.mjs pack --out=dist-site"
   },
   "dependencies": {
+    "ag-psd": "^34.1.0",
     "gifenc": "^1.0.3",
     "mp4-muxer": "^5.2.2",
     "react": "^19.3.1",

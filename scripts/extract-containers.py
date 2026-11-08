@@ -145,6 +145,175 @@ CONTAINERS = [
 ]
 
 
+# ------------------------------------------------------------------ 动态层
+# 容器界面不只是"一张背景 + 一堆格子"：熔炉有火焰和箭头，酿造台有气泡，信标有
+# 二十多个效果按钮。这些在原版里都是 renderBg / extractLabels 里的即时绘制，
+# 尺寸随进度变化。下面把每处绘制的**坐标与裁剪规则**按源码原样登记。
+#
+# @why 不用表达式求值器：早期版本试过把 `Mth.ceil(burnProgress * 24.0f)` 整段
+#      交给 eval，边界（0 长度、负高度、浮点转整）几乎全错且静默。改成结构化的
+#      {axis, align, scale, offset, max, table} 六个字段，每层只有一种解释。
+#
+# 层类型：
+#   progress        单轴裁剪，长度 = clamp(ceil(value*scale)+offset, 0, max)
+#   sprite          固定尺寸贴图，when 为参数键时按布尔开关
+#   effect-button   信标的效果按钮，按 tier 与选中状态换 sprite
+#   enchant-row     附魔台的三行槽位，前 N 行可用
+#   text            居中位图文字，text 是本地化键
+#   cost            铁砧右下角的等级消耗，右对齐、带半透明底
+
+
+def _furnace_layers(prefix):
+    return [
+        {'kind': 'progress', 'sprite': f'container/{prefix}/lit_progress',
+         'x': 56, 'y': 36, 'w': 14, 'h': 14, 'axis': 'y', 'align': 'end',
+         'scale': 13, 'offset': 1, 'max': 14, 'value': 'litProgress', 'when': 'lit'},
+        {'kind': 'progress', 'sprite': f'container/{prefix}/burn_progress',
+         'x': 79, 'y': 34, 'w': 24, 'h': 16, 'axis': 'x', 'align': 'start',
+         'scale': 24, 'value': 'burnProgress'},
+    ]
+
+
+# 来自 BeaconBlockEntity.BEACON_EFFECTS，顺序就是界面里按钮的顺序
+BEACON_EFFECTS = [['speed', 'haste'], ['resistance', 'jump_boost'], ['strength'], ['regeneration']]
+
+
+def _beacon_layers():
+    """复现 BeaconScreen.init 的按钮排布。
+
+    @constraint 上三排的基准是 leftPos + 76、行距 25；最右一列的效果按钮基准换成
+          leftPos + 167、y 固定 47。27 个按钮全部手写会错位，必须按源码公式算。
+    """
+    out = []
+    for tier in range(3):
+        effects = BEACON_EFFECTS[tier]
+        total = len(effects) * 22 + (len(effects) - 1) * 2
+        for index, effect in enumerate(effects):
+            out.append({'kind': 'effect-button', 'x': 76 + index * 24 - total // 2,
+                        'y': 22 + tier * 25, 'tier': tier,
+                        'effect': effect, 'slot': 'primary'})
+    effects = BEACON_EFFECTS[3]
+    total = (len(effects) + 1) * 22 + len(effects) * 2
+    for index, effect in enumerate(effects):
+        out.append({'kind': 'effect-button', 'x': 167 + index * 24 - total // 2,
+                    'y': 47, 'tier': 3, 'effect': effect, 'slot': 'secondary'})
+    out.append({'kind': 'text', 'text': 'block.minecraft.beacon.primary', 'cx': 62, 'y': 10})
+    out.append({'kind': 'text', 'text': 'block.minecraft.beacon.secondary', 'cx': 169, 'y': 10})
+    return out
+
+
+DYNAMICS = {
+    'furnace': {
+        'controls': [
+            {'key': 'lit', 'type': 'bool', 'label': '正在燃烧', 'default': True},
+            {'key': 'litProgress', 'type': 'range', 'label': '燃料余量', 'default': 0.85},
+            {'key': 'burnProgress', 'type': 'range', 'label': '烧炼进度', 'default': 0.45},
+        ],
+        'layers': _furnace_layers('furnace'),
+    },
+    'smoker': {
+        'controls': [
+            {'key': 'lit', 'type': 'bool', 'label': '正在燃烧', 'default': True},
+            {'key': 'litProgress', 'type': 'range', 'label': '燃料余量', 'default': 0.85},
+            {'key': 'burnProgress', 'type': 'range', 'label': '烧炼进度', 'default': 0.45},
+        ],
+        'layers': _furnace_layers('smoker'),
+    },
+    'blast_furnace': {
+        'controls': [
+            {'key': 'lit', 'type': 'bool', 'label': '正在燃烧', 'default': True},
+            {'key': 'litProgress', 'type': 'range', 'label': '燃料余量', 'default': 0.85},
+            {'key': 'burnProgress', 'type': 'range', 'label': '烧炼进度', 'default': 0.45},
+        ],
+        'layers': _furnace_layers('blast_furnace'),
+    },
+    'brewing': {
+        'controls': [
+            {'key': 'fuel', 'type': 'range', 'label': '燃料', 'default': 0.6},
+            {'key': 'brewProgress', 'type': 'range', 'label': '酿造进度', 'default': 0.4},
+            {'key': 'bubbles', 'type': 'range', 'label': '气泡', 'default': 1},
+        ],
+        'layers': [
+            {'kind': 'progress', 'sprite': 'container/brewing_stand/fuel_length',
+             'x': 60, 'y': 44, 'w': 18, 'h': 4, 'axis': 'x', 'align': 'start',
+             'scale': 18, 'value': 'fuel'},
+            {'kind': 'progress', 'sprite': 'container/brewing_stand/brew_progress',
+             'x': 97, 'y': 16, 'w': 9, 'h': 28, 'axis': 'y', 'align': 'start',
+             'scale': 28, 'value': 'brewProgress'},
+            # @why 气泡高度不是线性的：BrewingStandScreen.BUBBLELENGTHS 是一张
+            #      按 tick/2 % 7 取的离散表，所以这里给 table 而不是 scale。
+            {'kind': 'progress', 'sprite': 'container/brewing_stand/bubbles',
+             'x': 63, 'y': 14, 'w': 12, 'h': 29, 'axis': 'y', 'align': 'end',
+             'table': [29, 24, 20, 16, 11, 6, 0], 'value': 'bubbles'},
+        ],
+    },
+    'beacon': {
+        'controls': [
+            {'key': 'levels', 'type': 'int', 'label': '信标等级', 'default': 4, 'min': 0, 'max': 4},
+            {'key': 'primary', 'type': 'effect', 'label': '主效果', 'default': 'speed'},
+            {'key': 'secondary', 'type': 'effect', 'label': '副效果', 'default': 'regeneration'},
+        ],
+        'layers': _beacon_layers(),
+    },
+    'anvil': {
+        'controls': [
+            {'key': 'cost', 'type': 'int', 'label': '等级消耗', 'default': 7, 'min': 0, 'max': 50},
+        ],
+        # extractLabels: tx = imageWidth - 8 - width - 2，底 fill(tx-2, 67, imageWidth-8, 79)
+        'layers': [{'kind': 'cost', 'right': 168, 'y': 69, 'value': 'cost'}],
+    },
+    'enchanting': {
+        'controls': [
+            {'key': 'levels', 'type': 'int', 'label': '可用行数', 'default': 3, 'min': 0, 'max': 3},
+        ],
+        'layers': [{'kind': 'enchant-row', 'row': row, 'x': 0, 'y': 14 + 19 * row,
+                    'w': 108, 'h': 19} for row in range(3)],
+    },
+    'crafter': {
+        'controls': [
+            {'key': 'powered', 'type': 'bool', 'label': '已通红石', 'default': False},
+        ],
+        'layers': [{'kind': 'sprite', 'sprite': 'container/crafter/powered_redstone',
+                    'unset': 'container/crafter/unpowered_redstone',
+                    'x': 98, 'y': 16, 'w': 26, 'h': 26, 'value': 'powered'}],
+    },
+}
+
+
+# 快捷栏不在 AbstractContainerScreen 体系里，是 Hud 直接画的，单独构造。
+# Hud.extractItemHotbar: 底图 182×22，第 i 格物品在 (中心-90+i*20+2, 高-16-3)，
+# 相对底图就是 (i*20+3, 3)；选中框在 (中心-91-1+slot*20, 高-22-1) → (-1+slot*20, -1)。
+HOTBAR = {
+    'id': 'hotbar',
+    'name': '快捷栏',
+    'menu': 'Hud',
+    'screen': 'Hud',
+    'width': 182,
+    'height': 22,
+    'texture': None,
+    'draws': [],
+    'titleText': '',
+    'titleTextZh': '',
+    'labelText': '',
+    'labelTextZh': '',
+    'title': {'x': 0, 'y': 0},
+    'inventoryLabel': {'x': 0, 'y': 0},
+    'labelSpec': [],
+    'tradesText': '',
+    'tradesTextZh': '',
+    'slots': [{'x': 3 + index * 20, 'y': 3} for index in range(9)],
+    'controls': [{'key': 'selected', 'type': 'int', 'label': '选中格', 'default': 0, 'min': 0, 'max': 8},
+                 {'key': 'offhand', 'type': 'bool', 'label': '显示副手', 'default': False}],
+    'layers': [
+        {'kind': 'sprite', 'sprite': 'hud/hotbar', 'x': 0, 'y': 0, 'w': 182, 'h': 22},
+        {'kind': 'select', 'sprite': 'hud/hotbar_selection', 'x': -1, 'y': -1,
+         'w': 24, 'h': 23, 'step': 20, 'value': 'selected'},
+        {'kind': 'sprite', 'sprite': 'hud/hotbar_offhand_left', 'x': -29, 'y': -1,
+         'w': 29, 'h': 24, 'when': 'offhand'},
+    ],
+}
+
+
 # 容器标题的本地化键。游戏里标题由打开界面的一方传入 Component.translatable(...)，
 # 所以只能按容器类型登记；文本本身从 en_us.json 取，绝不手抄。
 TITLE_KEYS = {
@@ -504,6 +673,66 @@ def check_bounds(slots, width, height):
 
 # ------------------------------------------------------------------ 主流程
 
+def localize(layers, lang, lang_zh):
+    """把层里的本地化键就地解析成中英两版文本。
+
+    @why 前端不该为了三个字符串去拉整个 zh_cn.json（700KB+）。键在提取时
+          只剩 BeaconScreen 的 Primary/Secondary 与铁砧的 Cost 两类，直接展开。
+    @constraint 缺语言文件时保留键本身作为英文回退，不要留空串——空串会让
+          标签整个消失，比显示 `container.repair.cost` 更难查。
+    """
+    out = []
+    for layer in layers:
+        layer = dict(layer)
+        key = layer.get('text')
+        if layer['kind'] == 'text' and key:
+            layer['textEn'] = lang.get(key, key)
+            layer['textZh'] = lang_zh.get(key, layer['textEn'])
+        if layer['kind'] == 'cost':
+            for field, name in (('costEn', 'container.repair.cost'),
+                                ('expensiveEn', 'container.repair.expensive')):
+                layer[field] = lang.get(name, name)
+            layer['costZh'] = lang_zh.get('container.repair.cost', layer['costEn'])
+            layer['expensiveZh'] = lang_zh.get('container.repair.expensive', layer['expensiveEn'])
+        out.append(layer)
+    return out
+
+
+
+# ------------------------------------------------------------------ 标签
+# 标题与"物品栏"不是所有界面都画。基类 AbstractContainerScreen.extractLabels
+# 画 title + playerInventoryTitle 两行，但下面几个屏幕整个覆盖了它：
+#   InventoryScreen : 只画 title（玩家背包的标题本身就是"物品栏"，再画一遍就重复）
+#   BeaconScreen    : 一行都不画，只有两段效果标题（已在 layers 里）
+#   MerchantScreen  : 标题居中带等级，另外在左侧居中画 "Trades"
+# 照基类当成默认值硬画，背包会出现两个"物品栏"、信标的标题会压在效果按钮上。
+LABEL_OVERRIDES = {
+    'inventory': [{'src': 'title', 'align': 'left'}],
+    'beacon': [],
+    'villager': [
+        {'src': 'title', 'align': 'center', 'cx': 187},
+        {'src': 'label', 'align': 'left'},
+        {'src': 'trades', 'align': 'center', 'cx': 48, 'y': 6},
+    ],
+}
+
+
+def label_spec(cid, info):
+    items = LABEL_OVERRIDES.get(cid, [{'src': 'title', 'align': 'left'},
+                                      {'src': 'label', 'align': 'left'}])
+    out = []
+    for item in items:
+        spec = dict(item)
+        if item['src'] == 'title':
+            spec.setdefault('x', info['labels']['titleLabelX'])
+            spec.setdefault('y', info['labels']['titleLabelY'])
+        elif item['src'] == 'label':
+            spec.setdefault('x', info['labels']['inventoryLabelX'])
+            spec.setdefault('y', info['labels']['inventoryLabelY'])
+        out.append(spec)
+    return out
+
+
 def main():
     containers = []
     problems = []
@@ -551,21 +780,39 @@ def main():
             'titleTextZh': lang_zh.get(TITLE_KEYS.get(cid, ''), ''),
             'labelTextZh': lang_zh.get('container.inventory', ''),
             'title': {'x': info['labels']['titleLabelX'], 'y': info['labels']['titleLabelY']},
+            'labelSpec': label_spec(cid, info),
+            'tradesText': lang.get('merchant.trades', ''),
+            'tradesTextZh': lang_zh.get('merchant.trades', ''),
             'inventoryLabel': {'x': info['labels']['inventoryLabelX'],
                                'y': info['labels']['inventoryLabelY']},
             'slots': slots,
+            'controls': DYNAMICS.get(cid, {}).get('controls', []),
+            'layers': localize(DYNAMICS.get(cid, {}).get('layers', []), lang, lang_zh),
         })
 
-    payload = {'source': VERSION, 'containers': containers}
+    # 快捷栏同样带标题键占位，前端不必为它走特例
+    hotbar = dict(HOTBAR)
+    containers.append(hotbar)
+
+    # 信标效果按钮需要中文名。原版取 effect.minecraft.<id> 的本地化文本，
+    # 这里一次性导出四个效果的中英名，前端不必为了一个下拉框去拉 zh_cn.json。
+    effects = []
+    for group in BEACON_EFFECTS:
+        for effect in group:
+            key = f'effect.minecraft.{effect}'
+            effects.append({'id': effect, 'en': lang.get(key, effect), 'zh': lang_zh.get(key, effect)})
+
+    payload = {'source': VERSION, 'containers': containers, 'effects': effects}
     os.makedirs(os.path.dirname(OUT), exist_ok=True)
     with open(OUT, 'w', encoding='utf-8') as handle:
         json.dump(payload, handle, ensure_ascii=False, separators=(',', ':'))
 
     print(f'{len(containers)} 个容器 → {out_size(OUT)}')
     for item in containers:
+        extra = f" +{len(item['layers'])} 层" if item['layers'] else ''
         print(f"  {item['id']:<14} {item['width']:>3}x{item['height']:<4} "
-              f"槽位 {len(item['slots']):<3} 切片 {len(item['draws'])}  "
-              f"{item['texture'].split('/')[-1]}")
+              f"槽位 {len(item['slots']):<3} 切片 {len(item['draws'])}{extra}  "
+              f"{(item['texture'] or 'sprite').split('/')[-1]}")
     if problems:
         print('\n问题：')
         for line in problems:
