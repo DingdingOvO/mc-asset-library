@@ -2109,6 +2109,26 @@ button:disabled,
   z-index: 2;
 }
 
+/* 对齐参考线：只在拖动中且吸住时才存在，所以不需要 hover 逻辑 */
+.stage__guide {
+  position: absolute;
+  z-index: 3;
+  background: var(--accent);
+  pointer-events: none;
+}
+
+.stage__guide--v {
+  top: 0;
+  bottom: 0;
+  width: 1px;
+}
+
+.stage__guide--h {
+  left: 0;
+  right: 0;
+  height: 1px;
+}
+
 .stage__tools {
   position: absolute;
   left: 0;

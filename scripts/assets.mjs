@@ -28,6 +28,13 @@ const ASSETS_ROOT = path.join(ROOT, 'mc-assets')
 const DERIVED_ROOT = path.join(ROOT, 'mc-derived')
 const LOCK_FILE = path.join(ROOT, 'mc-assets.lock.json')
 
+/**
+ * 站点的一级路由（与 src/App.tsx 的 <Route path> 对齐）。
+ * @constraint 只列静态段；`items/:group` 这类带参路由靠 404.html 兜住即可，
+ *     把每个物品组都落一份 index.html 会让 _site 里多出几百份 800KB 的副本。
+ */
+const ROUTES = ['blocks', 'items', 'entities', 'particles', 'ui', 'data', 'browse', 'sounds']
+
 /** 派生数据：从反编译源码提取，无法由官方 jar 重建，必须入库 */
 const DERIVED_FILES = [
   'entitymodels.json',
@@ -449,6 +456,15 @@ async function cmdPack() {
   // @why 构建插件已经生成过；这里兜底，避免旧 dist 没有 404.html 时静态托管深链接直接断
   const notFound = path.join(outDir, '404.html')
   if (!(await exists(notFound))) await copyFile(path.join(outDir, 'index.html'), notFound)
+
+  // @why Pages 对任何未知路径都回 404.html，状态码也就跟着是 404。SPA 照样渲染，
+  //      但线上 `/ui` 在 devtools 里是一条红色的 404，任何存活检测/企业代理都会
+  //      把它当成页面挂了。一级路由各落一份 index.html，深链接才是 200。
+  for (const route of ROUTES) {
+    const dir = path.join(outDir, route)
+    await mkdir(dir, { recursive: true })
+    await copyFile(path.join(outDir, 'index.html'), path.join(dir, 'index.html'))
+  }
 
   const { files, bytes } = await measure(outDir)
   log(`已生成 ${path.relative(ROOT, outDir)}：${files} 个文件 / ${human(bytes)}`)

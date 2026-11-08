@@ -7,6 +7,7 @@ import { exportWorkspacePng, type ExportBackdrop } from '@/lib/containerRender'
 import { loadContainers, type ContainerControl, type ContainerDef, type EffectName } from '@/lib/containers'
 import { defaultParams } from '@/lib/layerRender'
 import { exportWorkspacePsd } from '@/lib/psd'
+import { snapMove } from '@/lib/snap'
 import { loadItems, type Item } from '@/lib/items'
 import { useAsync } from '@/lib/useAsync'
 import { useLibrary } from '@/lib/useLibrary'
@@ -660,6 +661,7 @@ function Stage({
 }: StageProps) {
   const drag = useRef<{ uid: string; px: number; py: number; nx: number; ny: number } | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null })
 
   const canvasSize = useMemo(() => {
     let width = 640
@@ -673,17 +675,24 @@ function Stage({
     return { width, height }
   }, [workspace.nodes, defs])
 
+  // @constraint 空画布不能套 canvasSize：手机默认 2 倍，minWidth 会是
+  //     640*2=1280，而 `.stage__empty` 用 left/right 定位，提示文字就居中到
+  //     屏幕外 500px 处，首次打开只看到一片空白网格（实测 rect.right=1266）。
   return (
     <div
       className={`stage${dragging ? ' stage--dragging' : ''}`}
-      style={{ minWidth: canvasSize.width * scale, minHeight: canvasSize.height * scale }}
+      style={
+        workspace.nodes.length === 0
+          ? undefined
+          : { minWidth: canvasSize.width * scale, minHeight: canvasSize.height * scale }
+      }
       onPointerDown={() => onSelect(null)}
     >
       {workspace.nodes.length === 0 && (
         <div className="stage__empty">
           <p className="stage__empty-title">画布是空的</p>
-          <p>左边点一个容器放进来</p>
-          <p>右边填数量、点物品，再点格子放下</p>
+          <p>先选一个容器放进来</p>
+          <p>点格子摆物品，右上角导出</p>
         </div>
       )}
 
@@ -711,18 +720,36 @@ function Stage({
               if (!current || current.uid !== node.uid) return
               const dx = (event.clientX - current.px) / scale
               const dy = (event.clientY - current.py) / scale
-              onMove(node.uid, Math.round(current.nx + dx), Math.round(current.ny + dy))
+              // @constraint 传的是未乘 scale 的 GUI 坐标：吸附容差按 GUI 像素算，
+              //      乘过 scale 之后 3 倍缩放下容差只剩 1.3 像素，会吸不住。
+              const others = workspace.nodes
+                .filter((other) => other.uid !== node.uid)
+                .map((other) => {
+                  const otherDef = defs.get(other.container)
+                  return otherDef
+                    ? { x: other.x, y: other.y, w: otherDef.width, h: otherDef.height }
+                    : null
+                })
+                .filter((rect): rect is NonNullable<typeof rect> => rect !== null)
+              const snapped = snapMove(
+                { x: current.nx + dx, y: current.ny + dy, w: def.width, h: def.height },
+                others,
+              )
+              onMove(node.uid, snapped.x, snapped.y)
+              setGuides({ x: snapped.gx, y: snapped.gy })
             }}
             onPointerUp={(event) => {
               if (drag.current) {
                 event.currentTarget.releasePointerCapture(event.pointerId)
                 drag.current = null
                 setDragging(false)
+                setGuides({ x: null, y: null })
               }
             }}
             onPointerCancel={() => {
               drag.current = null
               setDragging(false)
+              setGuides({ x: null, y: null })
             }}
           >
             <ContainerPanel
@@ -753,6 +780,13 @@ function Stage({
           </div>
         )
       })}
+
+      {guides.x !== null && (
+        <i className="stage__guide stage__guide--v" style={{ left: guides.x * scale }} />
+      )}
+      {guides.y !== null && (
+        <i className="stage__guide stage__guide--h" style={{ top: guides.y * scale }} />
+      )}
     </div>
   )
 }
