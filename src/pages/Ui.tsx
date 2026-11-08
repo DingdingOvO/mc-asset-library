@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useReducer, useRef, useState } from 'react'
+import { useCallback, useMemo, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { ContainerPanel } from '@/components/ContainerPanel'
 import { SearchBox } from '@/components/SearchBox'
@@ -10,13 +10,12 @@ import { exportWorkspacePsd } from '@/lib/psd'
 import { snapMove } from '@/lib/snap'
 import { loadItems, type Item } from '@/lib/items'
 import { useAsync } from '@/lib/useAsync'
+import { useWorkspace } from '@/lib/useWorkspace'
 import { useLibrary } from '@/lib/useLibrary'
 import {
   deserialize,
-  emptyWorkspace,
   freeSpot,
   serialize,
-  workspaceReducer,
   type ContainerNode,
   type PlacedItem,
   type Workspace,
@@ -74,7 +73,7 @@ function Workshop({ version }: { version: string }) {
   const containers = useAsync(`containers:${version}`, () => loadContainers(version))
   const items = useAsync(`items:${version}`, () => loadItems(version))
 
-  const [state, dispatch] = useReducer(workspaceReducer, undefined, emptyWorkspace)
+  const { workspace: state, dispatch, undo, redo, canUndo, canRedo } = useWorkspace()
   // @why 手机上 3 倍放大的容器比屏幕宽得多，默认降到 2 倍，少滚一点
   // @why 默认 2 倍：3 倍下三行箱子是 504×528，常见笔记本的可视画布只有 420 高，
   //      一放进来就要滚动，看起来像"面板被切了"。需要看清细节时手动切 3/4。
@@ -91,6 +90,9 @@ function Workshop({ version }: { version: string }) {
   const [note, setNote] = useState<string | null>(null)
   const [tip, setTip] = useState<TipState | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
+  /** 拖拽中的物品 id 与指针位置；两者都非空时才画跟随的幽灵块 */
+  const [dragItem, setDragItem] = useState<string | null>(null)
+  const [dragAt, setDragAt] = useState<{ x: number; y: number } | null>(null)
 
   const defs = useMemo(() => {
     const map = new Map<string, ContainerDef>()
@@ -141,8 +143,55 @@ function Workshop({ version }: { version: string }) {
     setSelected(uid)
   }
 
-  const onSlotClick = (uid: string, slot: number) => {
-    const node = state.nodes.find((entry) => entry.uid === uid)
+  /**
+   * 从物品列表拖到格子上。
+   *
+   * @why 两步操作（点物品拿起来、再点格子放下）在 24 个容器 + 90 个格子的画布上
+   *      很容易忘掉"手上还拿着东西"，然后误把物品拍进别的格子。拖拽是直接操作，
+   *      拿起来和放下是同一次手势。
+   * @constraint 位移小于 5px 时不当拖拽，仍然走 onClick 的"拿在手上"：
+   *      否则手抖一下就把点击吞了，用户点不出物品。
+   */
+  const beginItemDrag = (event: React.PointerEvent, id: string) => {
+    if (event.button !== 0) return
+    const from = { x: event.clientX, y: event.clientY }
+    let active = false
+
+    const move = (moveEvent: PointerEvent) => {
+      if (!active) {
+        if (Math.hypot(moveEvent.clientX - from.x, moveEvent.clientY - from.y) < 5) return
+        active = true
+        setDragItem(id)
+        setTip(null)
+      }
+      setDragAt({ x: moveEvent.clientX, y: moveEvent.clientY })
+    }
+
+    const up = (upEvent: PointerEvent) => {
+      window.removeEventListener('pointermove', move)
+      window.removeEventListener('pointerup', up)
+      window.removeEventListener('pointercancel', up)
+      setDragItem(null)
+      setDragAt(null)
+      if (!active) return
+      const under = document.elementFromPoint(upEvent.clientX, upEvent.clientY)
+      const slotEl = under?.closest('[data-slot]') as HTMLElement | null
+      const panelEl = under?.closest('[data-uid]') as HTMLElement | null
+      const slot = Number(slotEl?.dataset.slot)
+      const uid = panelEl?.dataset.uid
+      if (!slotEl || !uid || !Number.isInteger(slot)) return
+      dispatch({ type: 'put', uid, slot, item: { id, count: stack } })
+      // @why 拖完继续拿着同一物品：摆一排同类物品时不用每次回去点
+      setHeld({ id, count: stack })
+      setSelected(uid)
+    }
+
+    window.addEventListener('pointermove', move)
+    window.addEventListener('pointerup', up)
+    window.addEventListener('pointercancel', up)
+  }
+
+  const onSlotClick = (uid: string, slot: number) => {    const node = state.nodes.find((entry) => entry.uid === uid)
     if (!node) return
     const existing = node.items[slot]
     if (held) {
@@ -160,8 +209,7 @@ function Workshop({ version }: { version: string }) {
     }
   }
 
-  const onSlotHover = (uid: string, slot: number | null, at: { x: number; y: number } | null) => {
-    if (slot === null || !at) {
+  const onSlotHover = (uid: string, slot: number | null, at: { x: number; y: number } | null) => {    if (slot === null || !at) {
       setTip(null)
       return
     }
@@ -281,6 +329,29 @@ function Workshop({ version }: { version: string }) {
         </span>
         <span className="workbench__spacer" />
 
+        <div className="workbench__tools">
+        <div className="workbench__group" role="group" aria-label="撤销与重做">
+          <button
+            type="button"
+            className="chip chip--icon"
+            onClick={undo}
+            disabled={!canUndo}
+            title="撤销（Ctrl+Z）"
+            aria-label="撤销"
+          >
+            ↶
+          </button>
+          <button
+            type="button"
+            className="chip chip--icon"
+            onClick={redo}
+            disabled={!canRedo}
+            title="重做（Ctrl+Shift+Z）"
+            aria-label="重做"
+          >
+            ↷
+          </button>
+        </div>
         <div className="workbench__group" role="group" aria-label="缩放">
           {SCALES.map((value) => (
             <button
@@ -305,6 +376,8 @@ function Workshop({ version }: { version: string }) {
             </button>
           ))}
         </div>
+        </div>
+        <div className="workbench__actions">
         <details className="menu">
           <summary className="btn">{busy ? '导出中…' : '导出'}</summary>
           <div className="menu__list">
@@ -370,7 +443,15 @@ function Workshop({ version }: { version: string }) {
         >
           {confirmClear ? '确认清空？' : '清空'}
         </button>
+        </div>
       </header>
+
+      {dragItem && dragAt && (
+        <div className="drag-ghost" style={{ left: dragAt.x, top: dragAt.y }} aria-hidden="true">
+          <span className="drag-ghost__name">{nameOf(dragItem)}</span>
+          <span className="drag-ghost__count">× {stack}</span>
+        </div>
+      )}
 
       {note && (
         <p className="workbench__note" role="status">
@@ -479,6 +560,7 @@ function Workshop({ version }: { version: string }) {
                 type="button"
                 className={`item-chip${held?.id === item.id ? ' item-chip--on' : ''}`}
                 onClick={() => setHeld({ id: item.id, count: stack })}
+                onPointerDown={(event) => beginItemDrag(event, item.id)}
                 onPointerEnter={(event) => {
                   const box = event.currentTarget.getBoundingClientRect()
                   setTip({ x: box.left, y: box.top, title: item.n || item.id, sub: item.id })
@@ -703,6 +785,7 @@ function Stage({
         return (
           <div
             key={node.uid}
+            data-uid={node.uid}
             className={`stage__node${active ? ' stage__node--active' : ''}`}
             style={{ left: node.x * scale, top: node.y * scale }}
             onPointerDown={(event) => {

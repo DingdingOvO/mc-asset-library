@@ -194,6 +194,9 @@ export function ContainerPanel({
                 style={style}
                 tabIndex={interactive ? 0 : -1}
                 disabled={!interactive}
+                /* @why 拖放要在 window 的 pointerup 里用 elementFromPoint 反查落点，
+                   React 的合成事件拿不到跨组件目标，只能靠 DOM 属性传身份。 */
+                data-slot={index}
                 aria-label={item ? `${nameOf?.(item.id) ?? item.id} × ${item.count}` : `槽位 ${index + 1}`}
                 onClick={() => onSlotClick?.(index)}
                 onContextMenu={(event) => {

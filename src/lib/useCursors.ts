@@ -17,7 +17,7 @@ export function useCursors(): void {
       root.setProperty('--cur-arrow', cssCursor(theme, 'arrow', 'default'))
       root.setProperty('--cur-hand', cssCursor(theme, 'hand', 'pointer'))
       root.setProperty('--cur-grab', cssCursor(theme, 'grab', 'grab'))
-      root.setProperty('--cur-grabbing', cssCursor(theme, 'grab', 'grabbing'))
+      root.setProperty('--cur-grabbing', cssCursor(theme, 'grabbing', 'grabbing'))
       root.setProperty('--cur-text', cssCursor(theme, 'text', 'text'))
       root.setProperty('--cur-cross', cssCursor(theme, 'crosshair', 'crosshair'))
       root.setProperty('--cur-nodrop', cssCursor(theme, 'nodrop', 'not-allowed'))

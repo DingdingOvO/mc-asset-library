@@ -1748,6 +1748,17 @@ button:disabled,
   background: var(--surface);
 }
 
+/* @why desktop 上用 display: contents 让这两层包裹盒子完全消失，布局跟没包
+   一样；到窄屏再变成真正的两行。不用 contents 就得给顶栏写死 grid 区域。 */
+.workbench__tools,
+.workbench__actions {
+  display: contents;
+}
+
+.workbench__tools {
+  gap: 6px;
+}
+
 .workbench__back {
   font-size: 13px;
   white-space: nowrap;
@@ -2164,6 +2175,49 @@ button:disabled,
   background: rgb(255 255 255 / 32%);
 }
 
+/* 拖拽时跟着指针的物品块 */
+.drag-ghost {
+  position: fixed;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transform: translate(12px, 10px);
+  padding: 4px 9px;
+  border: 1px solid var(--accent);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+  white-space: nowrap;
+  box-shadow: var(--shadow);
+  /* @why 必须穿透：elementFromPoint 要拿到指针下面的格子，幽灵块挡住就永远落空 */
+  pointer-events: none;
+}
+
+.drag-ghost__count {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 撤销 / 重做：只放图标，宽度压到 30px，否则手机顶栏又会被挤成三行 */
+.chip--icon {
+  width: 30px;
+  padding: 0;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.chip:disabled {
+  opacity: 0.35;
+  cursor: var(--cur-nodrop, not-allowed);
+}
+
+.chip:disabled:hover {
+  border-color: var(--border);
+  color: var(--text-muted);
+}
+
 /* 状态面板 */
 /* @constraint 状态条是画布上方的一行，不是浮在画布上的卡片。浮层会盖住
    容器左下角——那正好是熔炉火焰和酿造气泡的位置，调参数时看不见效果。 */
@@ -2516,6 +2570,30 @@ button:disabled,
   .workbench__bar {
     gap: 5px;
     padding: 7px 10px;
+    flex-wrap: nowrap;
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  /* @constraint 手机顶栏只能是两行：一行放撤销/缩放/语言，一行放导出/导入/清空。
+     让它自然折行时，"清空"会单独掉到第三行，白吃掉 34px 画布高度。 */
+  .workbench__tools,
+  .workbench__actions {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .workbench__tools::-webkit-scrollbar,
+  .workbench__actions::-webkit-scrollbar {
+    display: none;
+  }
+
+  .workbench__actions {
+    justify-content: flex-end;
   }
 
   /* @why 标题、统计、返回在手机上一起去掉：顶栏本来就要折两行，留着它们
@@ -2556,12 +2634,27 @@ button:disabled,
     overflow-y: hidden;
   }
 
+  /* @why 分组标题不能 display:none。横滚条里有 24 个容器，去掉标题就是一整条
+     没有分隔的流水账，"快捷栏"和"熔炉"看起来是同一类东西。改成行内小标签，
+     滚动时跟着一起走，成本只有 4 个 chip 的宽度。 */
   .workbench__side--left .workbench__section {
-    display: none;
+    display: inline-flex;
+    flex: 0 0 auto;
+    align-items: center;
+    margin: 0 2px 0 8px;
+    padding: 2px 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: var(--bg);
+    color: var(--text-muted);
+    font-size: 11px;
+    font-weight: 600;
+    white-space: nowrap;
   }
 
   .palette {
     flex-direction: row;
+    align-items: center;
     flex: 0 0 auto;
   }
 
