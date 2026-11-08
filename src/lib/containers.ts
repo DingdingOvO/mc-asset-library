@@ -175,7 +175,9 @@ export function loadContainers(version: string): Promise<ContainerFile> {
   const hit = cache.get(version)
   if (hit) return hit
   const task = (async () => {
-    const response = await fetchWithRetry(`${BASE}/${version}/containers.json`)
+    // @constraint 必须带 ?v=：URL 里没有版本，改完数据用户会一直拿到浏览器缓存的
+    //      旧布局（实测分享站点上 hotbar 根本没出现，因为 27KB 的旧 JSON 被钉住了）。
+    const response = await fetchWithRetry(`${BASE}/${version}/containers.json?v=${__BUILD_ID__}`)
     if (!response.ok) throw new Error(`容器布局加载失败：${response.status}`)
     return (await response.json()) as ContainerFile
   })()

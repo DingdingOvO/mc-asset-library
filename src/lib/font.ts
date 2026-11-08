@@ -63,7 +63,8 @@ export function loadFont(version: string): Promise<GlyphFont | null> {
 async function loadZh(version: string): Promise<Map<number, ZhGlyph>> {
   const table = new Map<number, ZhGlyph>()
   try {
-    const response = await fetch(`${MC_BASE}/${version}/font-zh.json`)
+    // 同 containers.json：不带版本号会被缓存钉住，改完字形还是旧的
+    const response = await fetch(`${MC_BASE}/${version}/font-zh.json?v=${__BUILD_ID__}`)
     if (!response.ok) return table
     const data = (await response.json()) as {
       glyphs?: Record<string, { b?: string; a?: number }>

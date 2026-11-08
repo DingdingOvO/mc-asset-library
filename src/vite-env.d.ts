@@ -8,3 +8,4 @@ declare const __BUILD_TIME__: string
  * @why 不能用 import.meta.env.BASE_URL —— 单文件插件会把它强制成 './'
  */
 declare const __SITE_BASE__: string
+declare const __BUILD_ID__: string

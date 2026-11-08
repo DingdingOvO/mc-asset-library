@@ -66,6 +66,8 @@ export default defineConfig({
     __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
     // @why 站点可能挂在子路径下（GitHub Pages 是 /<repo>/），路由与素材地址都要带前缀
     __SITE_BASE__: JSON.stringify(siteBase),
+    /** 每次构建唯一。派生 JSON 的 URL 带上它，改动后不会被浏览器缓存钉住 */
+    __BUILD_ID__: JSON.stringify(Date.now().toString(36)),
   },
   build: {
     target: 'es2022',
