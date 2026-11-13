@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { containerTextureSrc, type ContainerDef, type ParamValue } from '@/lib/containers'
 import { loadFont, renderLine, type GlyphFont } from '@/lib/font'
-import { ensureIcon, iconKey, iconUrl } from '@/lib/itemIcon'
+import { ensureIcon, ICON_PIXELS, iconKey, iconUrl } from '@/lib/itemIcon'
 import { layerSprites, paintLabels, paintLayers } from '@/lib/layerRender'
 import { preloadSprites, spriteOf } from '@/lib/sprites'
 import type { PlacedItem } from '@/lib/workspace'
@@ -240,7 +240,7 @@ function SlotItem({
   item: PlacedItem
   texture?: string
 }) {
-  const size = 64
+  const size = ICON_PIXELS
   const key = iconKey(version, item.id, size)
   const [, setTick] = useState(0)
 

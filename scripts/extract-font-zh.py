@@ -64,6 +64,21 @@ def wanted_text(lang):
                 for key in ('textZh', 'costZh', 'expensiveZh'):
                     if layer.get(key):
                         out.append(layer[key])
+            # @why 状态条的控件标题（"显示经验条""全部缺货"）也画在画布上，
+            #      漏掉的话调参数时那一行就是问号。
+            for control in container.get('controls', []):
+                if control.get('label'):
+                    out.append(control['label'])
+
+    # @why 悬停提示要显示物品名，物品名里 689 个汉字都不在 container. 前缀下。
+    #      不收的话 hover 任何一件物品，提示框第一行都是"金合欢木????"。
+    items_path = os.path.join(ASSETS, 'items.json')
+    if os.path.exists(items_path):
+        with open(items_path, encoding='utf-8') as handle:
+            items = json.load(handle)
+        for item in items.get('items', []):
+            if item.get('n'):
+                out.append(item['n'])
     return out
 
 

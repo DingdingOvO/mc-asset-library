@@ -108,3 +108,50 @@ export function DownloadIcon() {
     </svg>
   )
 }
+
+/**
+ * 撤销 / 重做。
+ *
+ * @why 之前用的是「↶」「↷」(U+21B6 / U+21B7)。这两个字符在多数系统字体里
+ *      缺字形，Chord 字体回落之后画出来是一个带缺口的小方块，手机上看起来
+ *      像两个故障字符。用路径画就不依赖字体。
+ */
+export function UndoIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M6 4.2 2.6 7.1 6 10"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M2.8 7.1h6.1a4 4 0 0 1 0 8H6"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}
+
+export function RedoIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none" aria-hidden="true">
+      <path
+        d="M10 4.2 13.4 7.1 10 10"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+      <path
+        d="M13.2 7.1H7.1a4 4 0 0 0 0 8H10"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+      />
+    </svg>
+  )
+}

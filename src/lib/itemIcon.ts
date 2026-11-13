@@ -32,6 +32,23 @@ export function iconUrl(key: string): string | null {
   return entry?.ready ? entry.url : null
 }
 
+/**
+ * 图标该按多少物理像素光栅化。
+ *
+ * @why 图标在界面上占 16 GUI 像素（槽位内容）到 32 CSS 像素（物品网格）。
+ *      canvas 位图如果小于实际设备像素数，浏览器会把已经光栅化好的图再放大
+ *      一次——16×16 的贴图放大 1.5 倍就开始出灰边。乘上 devicePixelRatio 之后
+ *      1 个位图像素正好落在 1 个设备像素上，锯齿和模糊同时消失。
+ * @constraint 上限 3 倍：再高只是白烧内存，4K 屏上 96px 的图标已经看不出差别。
+ */
+export function iconPixelSize(cssSize: number): number {
+  const dpr = typeof window === 'undefined' ? 1 : Math.min(window.devicePixelRatio || 1, 3)
+  return Math.max(16, Math.round(cssSize * dpr))
+}
+
+/** 槽位与物品网格共用的光栅化尺寸：按 32 CSS 像素算，即 16 GUI 像素的 2 倍超采样 */
+export const ICON_PIXELS = iconPixelSize(32)
+
 export function iconKey(version: string, itemId: string, size: number): string {
   return `${version}|${itemId}|${size}`
 }
