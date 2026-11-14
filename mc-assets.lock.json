@@ -1,9 +1,9 @@
 {
   "version": "26.3",
-  "generatedAt": "2026-11-07T00:28:21.656Z",
+  "generatedAt": "2026-11-14T06:46:56.124Z",
   "assets": {
-    "files": 17269,
-    "bytes": 482360080,
+    "files": 18795,
+    "bytes": 487334650,
     "withSounds": true
   },
   "derived": {
@@ -16,8 +16,8 @@
       "sha256": "69e8ff1738e52d1baade197be04207a28af1d03b9acb33fdaff1a536a91f7cfb"
     },
     "entitylayers.json": {
-      "bytes": 30707,
-      "sha256": "ac1be88adcfbf8729cc3f476fbeae6852a05a69b1458b958eda522616bdfe579"
+      "bytes": 47016,
+      "sha256": "7b4b2d1e1a8be8e20d49d13d878d7cc6c8d582113b244a72cf740eb95f3de179"
     },
     "entityrenderers.json": {
       "bytes": 45168,
@@ -34,6 +34,10 @@
     "sounds.json": {
       "bytes": 515640,
       "sha256": "35d7aa8d4855a25a8581803290348dfec012b2845009e56f3504bd64f1ce91c8"
+    },
+    "structures.json": {
+      "bytes": 167229,
+      "sha256": "a0d8fe7a81dff3191102595791aa3b0c0a26f19be733c7514cc45eba83f306e0"
     }
   }
 }

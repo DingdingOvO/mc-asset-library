@@ -33,7 +33,7 @@ const LOCK_FILE = path.join(ROOT, 'mc-assets.lock.json')
  * @constraint 只列静态段；`items/:group` 这类带参路由靠 404.html 兜住即可，
  *     把每个物品组都落一份 index.html 会让 _site 里多出几百份 800KB 的副本。
  */
-const ROUTES = ['blocks', 'items', 'entities', 'particles', 'ui', 'data', 'browse', 'sounds']
+const ROUTES = ['blocks', 'items', 'entities', 'particles', 'ui', 'data', 'browse', 'sounds', 'structures']
 
 /** 派生数据：从反编译源码提取，无法由官方 jar 重建，必须入库 */
 const DERIVED_FILES = [
@@ -44,6 +44,9 @@ const DERIVED_FILES = [
   'particledata.json',
   'creativetabs.json',
   'sounds.json',
+  // @constraint 结构索引必须登记：它缺失时结构页只会显示空列表，不报任何错，
+  //      和「素材没下完」的表象完全一样，不点名就无从排查
+  'structures.json',
 ]
 
 /**
@@ -63,6 +66,9 @@ const REQUIRED = [
   'models/item',
   'blockstates',
   'items',
+  // @why 结构是唯一被改写路径的提取范围（jar 的 data/ 下剥进 structures/）。
+  //      不点名的话，老素材目录会一直判定"已就绪"，结构页静默空掉。
+  'structures',
   'lang/zh_cn.json',
   'lang/en_us.json',
 ]

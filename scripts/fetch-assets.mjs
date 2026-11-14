@@ -72,8 +72,24 @@ const KEEP_PREFIXES = [
   'data/minecraft/instrument/',
   'data/minecraft/worldgen/biome/',
   'data/minecraft/tags/item/',
+  // @why 结构模板是站点「建筑预览」的唯一数据源，1511 个 .nbt 合计 7.7MB。
+  //      它们不在 asset index 里（那是 assets 侧清单），补缺逻辑抓不到，
+  //      只能靠这里从 jar 直接剥出来，否则线上 structures/*.nbt 全是 404。
+  'data/minecraft/structure/',
 ]
 const DROP_EXT = new Set(['.class', '.mf', '.sf', '.rsa', '.ds_store'])
+
+/**
+ * jar 内路径 → 输出路径的改写表，按顺序首个命中生效。
+ * @why 两个来源目录要落到不同位置：assets/minecraft/ 摊平到输出根（前端按
+ *      textures/xxx.png 取），data/minecraft/structure/ 要落进 structures/
+ *      （前端按 structures/<path>.nbt 取）。单条 strip 前缀表达不了这个，
+ *      硬用一个前缀会让结构文件留在 data/minecraft/structure 下对不上路由。
+ */
+const JAR_REWRITES = [
+  ['assets/minecraft/', ''],
+  ['data/minecraft/structure/', 'structures/'],
+]
 
 function log(...parts) {
   console.log('[mc]', ...parts)
@@ -117,8 +133,12 @@ async function download(url, dest) {
   return true
 }
 
-/** 解 jar，按 filter 落盘（strip 为需要剥离的路径前缀）；返回写出的相对路径列表 */
-function unzipJar(jarPath, outDir, filter, strip = '') {
+/**
+ * 解 jar，按 filter 落盘并按 rewrites 改写路径。
+ * @returns {{ rel: string, source: string }[]} rel 是输出相对路径，source 是 jar 内原始路径
+ *          （后面要和 asset index 的 minecraft/ 键比对，只有原始路径有意义）
+ */
+function unzipJar(jarPath, outDir, filter, rewrites = []) {
   return new Promise((resolve, reject) => {
     const written = []
     yauzl.open(jarPath, { lazyEntries: true }, (err, zip) => {
@@ -132,7 +152,8 @@ function unzipJar(jarPath, outDir, filter, strip = '') {
         if (DROP_EXT.has(ext)) return zip.readEntry()
         if (!filter(name)) return zip.readEntry()
 
-        const rel = strip && name.startsWith(strip) ? name.slice(strip.length) : name
+        const rule = rewrites.find(([from]) => name.startsWith(from))
+        const rel = rule ? rule[1] + name.slice(rule[0].length) : name
         const dest = path.join(outDir, rel)
         mkdir(path.dirname(dest), { recursive: true })
           .then(
@@ -143,7 +164,7 @@ function unzipJar(jarPath, outDir, filter, strip = '') {
                   const out = createWriteStream(dest)
                   stream.pipe(out)
                   out.on('close', () => {
-                    written.push(rel)
+                    written.push({ rel, source: name })
                     res()
                   })
                   out.on('error', rej)
@@ -1849,10 +1870,18 @@ async function main() {
   const hasIndex = await exists(path.join(outDir, 'index.json'))
   // data 是后来才加入提取范围的，老输出里没有，需要重新解一次 jar
   const hasData = await exists(path.join(outDir, 'data', 'minecraft'))
+  /**
+   * @why 结构比 data 更后加入，而且是唯一被改写路径范围（落到 structures/ 而不是
+   *      data/ 下）。只看 index.json 与 data/ 会让「已有输出，跳过解压」把新范围
+   *      永久跳过——CI 从缓存恢复的 mc-assets 正是这种老输出。
+   */
+  const hasStructures = (
+    await readdir(path.join(outDir, 'structures')).catch(() => [])
+  ).length > 0
   await mkdir(outDir, { recursive: true })
 
   let written = []
-  if (hasIndex && hasData) {
+  if (hasIndex && hasData && hasStructures) {
     log('已有输出，跳过解压，仅补齐缺失对象')
   } else {
     log('解压 jar 内 assets…')
@@ -1860,7 +1889,7 @@ async function main() {
       jarPath,
       outDir,
       (name) => KEEP_PREFIXES.some((p) => name.startsWith(p)) && langAllowed(name),
-      'assets/minecraft/',
+      JAR_REWRITES,
     )
     log(`  解出 ${written.length} 个文件`)
   }
@@ -1870,8 +1899,16 @@ async function main() {
   if (!(await exists(indexPath))) await download(meta.assetIndex.url, indexPath)
   const assetIndex = JSON.parse(await readFile(indexPath, 'utf8'))
 
-  // @why 只有 strip 后的路径才有 minecraft/ 对应关系，pack.mcmeta 等根文件不参与比对
-  const jarSet = new Set(written.filter((p) => p.includes('/')).map((p) => `minecraft/${p}`))
+  /**
+   * @constraint 只认 assets/minecraft/ 下的文件，且要按原始路径拼 key：改写后
+   *      structures/xxx.nbt、data/minecraft/xxx.json 也在 written 里，全塞进来会
+   *      凭空多出一万多个 asset index 永远查不到的假键，比对时白遍历一遍。
+   */
+  const jarSet = new Set(
+    written
+      .filter((entry) => entry.source.startsWith('assets/minecraft/'))
+      .map((entry) => `minecraft/${entry.rel}`),
+  )
 
   const missing = []
   for (const [key, value] of Object.entries(assetIndex.objects)) {

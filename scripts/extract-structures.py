@@ -10,6 +10,10 @@
       （村庄怎么拼、要塞有几间），不是几何；先有几何再谈拼装。
 @constraint 输出进 mc-assets（gitignore），索引进 mc-derived（入库）：
       4MB 二进制可以由这个脚本随时重建，索引是前端要用的清单，必须跟着仓库走。
+@constraint 部署链上不跑这个脚本。CI 里 .nbt 由 scripts/fetch-assets.mjs 从 jar
+      直接剥到 mc-assets/<version>/structures/（同一批文件、同一套路径），
+      索引则由 mc-derived 随仓库分发。本脚本只在需要重建索引时本地跑一次。
+      两边路径必须保持一致，改一边就得改另一边。
 
 输入：.cache/client-26.3.jar
 输出：mc-assets/<version>/structures/**/*.nbt、mc-derived/<version>/structures.json
