@@ -13,7 +13,7 @@ import {
 import { useAsync } from '@/lib/useAsync'
 import { useLibrary } from '@/lib/useLibrary'
 import { usePaged } from '@/lib/usePaged'
-import { tipAttrs } from '@/components/GlobalTooltip'
+import { tipAttrs } from '@/lib/tip'
 
 export default function Registry() {
   const { id = '' } = useParams()

@@ -614,6 +614,11 @@ def main():
 
     apply_villager_axes(layers_out, axes_out, table)
 
+    # 后续两步（可以单独跑，也可以在本脚本之后跑）：
+    #   extract-sizes.py  从实体模型表补出体型（成年 / 幼年）轴
+    #   extract-gates.py  从图层源码补出「这一层什么条件下才画」
+    # @why 不在这里直接调用：两者都只依赖已经产出的 JSON，独立跑就不会
+    #      因为一次反编译目录缺失而连带把图层数据也写坏。
     payload = {
         'dyes': [{'k': k, 'zh': zh, 'rgb': rgb} for k, zh, rgb in DYE_LIST],
         'version': json.load(open(os.path.join(ROOT, 'mc-assets', VERSION, 'version.json'))).get('id', '26.3')

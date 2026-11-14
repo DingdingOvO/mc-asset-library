@@ -8,7 +8,7 @@ import { loadParticles, type ParticleDef } from '@/lib/particles'
 import { useAsync } from '@/lib/useAsync'
 import { useLibrary } from '@/lib/useLibrary'
 import { useVirtualGrid } from '@/lib/useVirtualGrid'
-import { tipAttrs } from '@/components/GlobalTooltip'
+import { tipAttrs } from '@/lib/tip'
 
 export default function Particles() {
   const { version, loading, error } = useLibrary()

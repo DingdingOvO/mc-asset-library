@@ -1,10 +1,9 @@
 import { useCallback, useMemo, useState } from 'react'
 import { SearchBox } from '@/components/SearchBox'
 import { McTooltip, type TipState } from '@/components/McTooltip'
-import { exportWorkspacePng, type ExportBackdrop } from '@/lib/containerRender'
+import { BACKDROPS as EXPORT_BACKDROPS, type ExportBackdrop } from '@/lib/containerRender'
 import { loadContainers, type ContainerDef, type EffectName } from '@/lib/containers'
 import { defaultParams } from '@/lib/layerRender'
-import { exportWorkspacePsd } from '@/lib/psd'
 import { loadItems, type Item } from '@/lib/items'
 import { useAsync } from '@/lib/useAsync'
 import { useWorkspace } from '@/lib/useWorkspace'
@@ -14,10 +13,12 @@ import { StatePanel } from '@/components/workbench/StatePanel'
 import { Toolbar } from '@/components/workbench/Toolbar'
 import { ContainerPalette } from '@/components/workbench/ContainerPalette'
 import { useLibrary } from '@/lib/useLibrary'
+import { runTarget, suggestName, targetsFor, type ExportTarget } from '@/lib/export/registry'
+import { saveBlob } from '@/lib/export/types'
+import type { LayoutSubject } from '@/lib/export/types'
 import {
   deserialize,
   freeSpot,
-  serialize,
   type PlacedItem,
   type Workspace,
 } from '@/lib/workspace'
@@ -56,7 +57,7 @@ function Workshop({ version }: { version: string }) {
   const [backdrop, setBackdrop] = useState<ExportBackdrop>('transparent')
   // @why 默认中文：站点是给中文用户做视频用的。做官方截图还原时切回英文原版
   const [lang, setLang] = useState<'zh' | 'en'>('zh')
-  const [busy, setBusy] = useState<'png' | 'psd' | null>(null)
+  const [busy, setBusy] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
   const [tip, setTip] = useState<TipState | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
@@ -198,50 +199,45 @@ function Workshop({ version }: { version: string }) {
     })
   }
 
-  const runExport = async (kind: 'png' | 'psd') => {
+  /**
+   * 导出对象。
+   * @why 把所有渲染参数收成一个 subject，导出目标只认这个对象。
+   *      以前每个按钮各拼一遍 options，加一种格式就要再抄一次参数，
+   *      PSD 与 PNG 的底色因此还曾经对不上（一个用 hex，一个用枚举）。
+   */
+  const layoutSubject = useMemo<LayoutSubject>(
+    () => ({
+      kind: 'layout',
+      name: 'mc-ui',
+      workspace: state,
+      defs,
+      options: { version, scale, lang, textureOf },
+      backdrop: backdrop === 'transparent' ? null : EXPORT_BACKDROPS[backdrop],
+    }),
+    [state, defs, version, scale, lang, textureOf, backdrop],
+  )
+
+  const exportTargets = useMemo(() => targetsFor(layoutSubject), [layoutSubject])
+
+  const runExport = async (target: ExportTarget) => {
     if (state.nodes.length === 0) {
       setNote('画布是空的，先从左边放一个容器进来')
       return
     }
-    setBusy(kind)
+    setBusy(target.id)
     setNote(null)
     try {
-      const options = { version, scale, lang, textureOf }
-      if (kind === 'png') {
-        const blob = await exportWorkspacePng(state, defs, { ...options, backdrop })
-        if (!blob) {
-          setNote('导出失败：画布里没有可绘制的容器')
-          return
-        }
-        download(blob, `mc-ui-${stamp()}.png`)
-      } else {
-        const blob = await exportWorkspacePsd(state, defs, {
-          ...options,
-          backdrop: backdrop === 'transparent' ? null : backdrop === 'dark' ? '#1b1b1f' : '#f2f2f4',
-        })
-        if (!blob) {
-          setNote('导出失败：画布里没有可绘制的容器')
-          return
-        }
-        download(blob, `mc-ui-${stamp()}.psd`)
+      const blob = await runTarget(layoutSubject, target)
+      if (!blob) {
+        setNote('导出失败：画布里没有可绘制的容器')
+        return
       }
+      saveBlob(blob, suggestName(layoutSubject, target))
     } catch (error) {
       setNote(`导出失败：${error instanceof Error ? error.message : String(error)}`)
     } finally {
       setBusy(null)
     }
-  }
-
-  const exportJson = () => {
-    if (state.nodes.length === 0) {
-      setNote('画布是空的，没有可导出的布局')
-      return
-    }
-    const payload = serialize(state, version)
-    download(
-      new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }),
-      `mc-ui-${stamp()}.json`,
-    )
   }
 
   const importJson = async (file: File) => {
@@ -320,9 +316,8 @@ function Workshop({ version }: { version: string }) {
         busy={busy}
         backdrop={backdrop}
         onBackdrop={setBackdrop}
-        onExportPng={() => void runExport('png')}
-        onExportPsd={() => void runExport('psd')}
-        onExportJson={exportJson}
+        exportTargets={exportTargets}
+        onExport={(target) => void runExport(target)}
         onImport={(file) => void importJson(file)}
         confirmClear={confirmClear}
         onClear={onClear}
@@ -430,14 +425,3 @@ function Workshop({ version }: { version: string }) {
   )
 }
 
-const stamp = () => new Date().toISOString().slice(0, 19).replace(/[-:T]/g, '')
-
-function download(blob: Blob, filename: string) {
-  const url = URL.createObjectURL(blob)
-  const link = document.createElement('a')
-  link.href = url
-  link.download = filename
-  link.click()
-  // @why 立刻回收会让部分浏览器在下载启动前就把 URL 释放掉
-  setTimeout(() => URL.revokeObjectURL(url), 4000)
-}

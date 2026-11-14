@@ -158,14 +158,16 @@ function atlas(font: GlyphFont, color: string): HTMLCanvasElement {
 }
 
 /**
- * 单个中文字的位图。
+ * 单个中文字的位图，**保持点阵原分辨率**（span × 16）。
  *
- * @why 每个字单独缓存而不是拼大图集：容器标题一共十来个字，按需生成比维护
- *      一张需要动态扩容的图集便宜得多，而且颜色只有两三种。
+ * @why 缩放交给 `drawImage` 在设备像素空间里做，这里绝不预先降采样。
+ *      UnihexProvider 的 oversample=2 不是"把 16×16 压成 8×8"——图集里存的
+ *      是完整 16×16，绘制时按 1/2 的 GUI 尺寸贴，GPU 采样落在屏幕像素上。
+ *      GUI scale 2、DPR 2 时一个汉字正好占 32 个设备像素，16 个点阵列完美
+ *      1:2 落位；提前压成 8×8 再放大，等于先丢一半笔画再插值，笔画必然粘连。
  *
- * @constraint 输出宽度必须是 `round((right-left+1)/2)`，和 advance 严格对齐。
- *      原版这里做的是 oversample 2 的降采样：16 行的点阵画成 8 行，横向同理。
- *      宽度多算半格会让字和字之间空出一条缝，少算半格就直接咬字。
+ * @constraint 输出必须是原始 span 宽，不能顺手裁。裁掉任何一列都会让
+ *      `drawImage` 的源宽与 GUI 目标宽比例失衡，字被横向拉斜。
  */
 function zhTile(font: GlyphFont, code: number, color: string): HTMLCanvasElement | null {
   const glyph = font.zh.get(code)
@@ -178,47 +180,40 @@ function zhTile(font: GlyphFont, code: number, color: string): HTMLCanvasElement
   for (let row = 0; row < 16; row += 1) rows.push(parseInt(glyph.bits.slice(row * 4, row * 4 + 4), 16))
   const span = glyph.right - glyph.left + 1
   if (span <= 0) return null
-  const cols = Math.max(1, Math.round(span / 2))
 
   const canvas = document.createElement('canvas')
-  canvas.width = cols
-  canvas.height = CELL
+  canvas.width = span
+  canvas.height = 16
   const ctx = canvas.getContext('2d')
   if (!ctx) return null
-  const image = ctx.createImageData(cols, CELL)
+  const image = ctx.createImageData(span, 16)
   const rgb = parseColor(color)
 
-  for (let y = 0; y < CELL; y += 1) {
-    for (let x = 0; x < cols; x += 1) {
-      let lit = 0
-      for (let dy = 0; dy < 2; dy += 1) {
-        const bits = rows[y * 2 + dy] ?? 0
-        for (let dx = 0; dx < 2; dx += 1) {
-          const col = glyph.left + x * 2 + dx
-          if (col > glyph.right) continue
-          if ((bits >> (15 - col)) & 1) lit += 1
-        }
-      }
-      if (lit === 0) continue
-      // @constraint 覆盖 1/4 的格子必须整块丢弃，不能给低 alpha。原版是 1-bit
-      //      字形，半透明的零散点会在浅灰背景上显示成一层灰噪，放大 4 倍后
-      //      "箱子"周围全是脏点。只有 2 格以上覆盖才认为这一格属于笔画。
-      //      保留 2/4 与 3/4 的中间灰度，是为了让斜笔不至于变成锯齿阶梯。
-      const level = lit / 4
-      if (level < 0.5) continue
-      const index = (y * cols + x) * 4
+  for (let y = 0; y < 16; y += 1) {
+    const bits = rows[y] ?? 0
+    for (let x = 0; x < span; x += 1) {
+      const col = glyph.left + x
+      if (col > 15) break
+      if (((bits >> (15 - col)) & 1) === 0) continue
+      const index = (y * span + x) * 4
       image.data[index] = rgb[0]
       image.data[index + 1] = rgb[1]
       image.data[index + 2] = rgb[2]
-      // @constraint 2/4 覆盖给 200 而不是按比例给 128。汉字压到 8×8 之后笔画
-      //      只剩 1 格宽，按比例算会让所有笔画都变成半透明灰，标题整行发虚；
-      //      抬到 200 才能在被 4 倍放大时立住，同时比 3/4、4/4 略淡，保住笔锋。
-      image.data[index + 3] = lit === 4 ? 255 : lit === 3 ? 232 : 200
+      image.data[index + 3] = 255
     }
   }
   ctx.putImageData(image, 0, 0)
   font.zhTiles.set(key, canvas)
   return canvas
+}
+
+/**
+ * 汉字在位图原分辨率下占的 GUI 宽度。
+ * @constraint 必须与 advance 同源（advance = floor(span/2) + 1），
+ *      少算半格两个字的笔画会咬在一起，多算半格中间会开一道缝。
+ */
+function zhGuiWidth(glyph: ZhGlyph): number {
+  return Math.max(1, Math.round((glyph.right - glyph.left + 1) / 2))
 }
 
 function parseColor(color: string): [number, number, number] {
@@ -270,9 +265,13 @@ export function drawText(
     if (code >= 256) {
       const tile = zhTile(font, code, color)
       if (tile) {
-        // 点阵已在 zhTile 里合并成 8×8，这里 1:1 贴上去，与原版 8px 字高一致
-        ctx.drawImage(tile, cursor, y)
-        cursor += font.zh.get(code)?.advance ?? 9
+        const glyph = font.zh.get(code)!
+        const guiW = zhGuiWidth(glyph)
+        // @constraint 目标高必须是 CELL(8) 而不是 16：点阵占 8 个 GUI 像素，
+        //      与 ascii.png 的 8px 字高对齐，汉字和数字才在同一基线上。
+        //      缩放在这里发生，落在设备像素上是 8×ratio，ratio=2 时正好 1:1。
+        ctx.drawImage(tile, cursor, y, guiW, CELL)
+        cursor += glyph.advance
         continue
       }
     }

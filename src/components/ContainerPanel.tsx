@@ -136,8 +136,22 @@ export function ContainerPanel({
     if (!canvas) return
     const ctx = canvas.getContext('2d')
     if (!ctx) return
+    /* @constraint canvas 的位图尺寸必须是「GUI 尺寸 × 设备比率」，不能是 GUI 尺寸本身。
+       外层用 `transform: scale(3)` 放大，如果 canvas 只有 176×166 个真实像素，
+       一个汉字就只有 8 个像素可画，被 CSS 拉到 24px 后笔画必然粘连——这正是
+       "中文糊成一坨"的直接来源，跟字形数据的精度无关。ratio 取
+       round(scale × dpr)，保证一个 GUI 像素落在整数个设备像素上，
+       与 Sodium 对界面缩放的处理一致。 */
+    const ratio = Math.max(1, Math.min(8, Math.round(scale * (window.devicePixelRatio || 1))))
+    const deviceW = def.width * ratio
+    const deviceH = def.height * ratio
+    if (canvas.width !== deviceW) canvas.width = deviceW
+    if (canvas.height !== deviceH) canvas.height = deviceH
+    canvas.style.width = `${def.width}px`
+    canvas.style.height = `${def.height}px`
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0)
     ctx.imageSmoothingEnabled = false
-    ctx.clearRect(0, 0, canvas.width, canvas.height)
+    ctx.clearRect(0, 0, def.width, def.height)
     const bg = bgRef.current
     if (bg) {
       for (const draw of def.draws) {
@@ -152,7 +166,7 @@ export function ContainerPanel({
       params,
       getSprite: (name) => spriteOf(version, name),
     })
-  }, [def, font, lang, params, version])
+  }, [def, font, lang, params, version, scale])
 
   useEffect(() => {
     if (bgState !== 'done' && bgState !== 'none') return

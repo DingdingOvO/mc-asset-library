@@ -1,6 +1,5 @@
 import { Link, NavLink, Outlet } from 'react-router-dom'
 import { ThemeToggle } from './ThemeToggle'
-import { GlobalTooltip } from './GlobalTooltip'
 
 export function AppShell() {
   return (
@@ -44,7 +43,6 @@ export function AppShell() {
       <main>
         <Outlet />
       </main>
-      <GlobalTooltip />
       <footer className="footer">
         <span>
           素材版权归 Mojang Studios 与 Microsoft 所有，本站为视频制作与学习提供素材参考，非官方站点。

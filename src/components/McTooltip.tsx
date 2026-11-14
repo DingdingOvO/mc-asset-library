@@ -64,9 +64,12 @@ export function McTooltip({ tip, version }: { tip: TipState | null; version: str
 
   const lines = useMemo<TipLine[]>(() => {
     if (!tip) return []
+    // @constraint 第二行必须是 ChatFormatting.GRAY = #AAAAAA 的纯灰。
+    //      之前用的 #a8a8b8 带了蓝紫偏色，压在紫边框上整行发紫，
+    //      和原版"白色主行 + 灰色副行"的对比完全不是一回事。
     const out: TipLine[] = [{ text: tip.title, color: '#ffffff' }]
-    if (tip.note) out.push({ text: tip.note, color: '#a8a8b8' })
-    if (tip.sub) out.push({ text: tip.sub, color: '#7a7a90' })
+    if (tip.note) out.push({ text: tip.note, color: '#aaaaaa' })
+    if (tip.sub) out.push({ text: tip.sub, color: '#aaaaaa' })
     return out
   }, [tip])
 

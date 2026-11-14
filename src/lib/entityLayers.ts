@@ -32,6 +32,18 @@ export interface LayerDef {
   k?: 'wool' | 'tame'
   /** 该图层可换的多张贴图（斑纹、骷髅衣服） */
   v?: string[]
+  /**
+   * 0 = 只画成年体。
+   * @why 值不是"有没有幼年变体"，而是源码 submit() 里的排除条件：
+   *      SheepWoolUndercoatLayer 直接 `if (state.isBaby) return`。
+   *      不知道这条就会给幼年羊叠一层成年尺寸的白绒，整只被白点包住。
+   */
+  b?: 0
+  /**
+   * 1 = 只有染色过的才画（白羊毛没有底绒）。
+   * 源码条件：state.woolColor == DyeColor.WHITE 时 return。
+   */
+  y?: 1
 }
 
 export interface AxisOption {
@@ -56,11 +68,34 @@ export interface DyeColor {
   rgb: string
 }
 
+/**
+ * 幼年体（体型变体）。
+ *
+ * @why 原版里幼年不是「把成年模型缩小」：BabySheepModel 是一具独立烘焙的骨架，
+ *      贴图也是独立文件（sheep_baby.png、sheep_wool_baby.png）。数据由
+ *      scripts/extract-sizes.py 从 entitymodels.json 与贴图目录配出来，
+ *      这里只负责按当前选择查表。
+ */
+export interface SizeDef {
+  /** 幼年几何的 bake 键（sheep_baby） */
+  m: string | null
+  /** 幼年体的动画类名（BabySheepModel）；没有就只能是静态姿势 */
+  c?: string
+  /** 默认幼年本体贴图 */
+  t?: string
+  /** 成年贴图 → 幼年贴图。品种轴与体型轴同时生效时靠它换算 */
+  tex?: Record<string, string>
+  /** 图层类名 → 幼年图层（羊毛层是另一套几何与贴图） */
+  layers?: Record<string, { t?: string | null; m?: string | null }>
+}
+
 export interface LayerFile {
   version: string
   dyes: DyeColor[]
   layers: Record<string, LayerDef[]>
   axes: Record<string, Axis[]>
+  /** 有幼年形态的实体。缺省表示该实体没有幼年变体 */
+  sizes?: Record<string, SizeDef>
 }
 
 const cache = new Map<string, Promise<LayerFile>>()
@@ -69,7 +104,7 @@ export function loadLayers(version: string): Promise<LayerFile> {
   const hit = cache.get(version)
   if (hit) return hit
   const task = (async () => {
-    const response = await fetchWithRetry(`${MC_BASE}/${version}/entitylayers.json?v=2`)
+    const response = await fetchWithRetry(`${MC_BASE}/${version}/entitylayers.json?v=3`)
     if (!response.ok) throw new Error(`图层数据加载失败：${response.status}`)
     return (await response.json()) as LayerFile
   })()
@@ -142,9 +177,15 @@ export function composeLayers(
   const axes = file?.axes[entity] ?? []
   const dyeAxis = axes.find((axis) => axis.dye)
   const tint = dyeAxis ? dyeTint(file!, choice[dyeAxis.k] ?? '') : undefined
+  const baby = choice.size === 'baby' ? file?.sizes?.[entity] : undefined
+  const dyed = dyeAxis ? (choice[dyeAxis.k] ?? '') : ''
 
   const out: EntityLayer[] = []
   for (const def of defs) {
+    // 源码里的绘制条件，逐条照抄：跳过就真的不画
+    if (baby && def.b === 0) continue
+    if (def.y === 1 && (!dyed || dyed === 'none' || dyed === 'white')) continue
+
     const axis = axes.find((item) => item.layer === def.c)
     let texture = def.t
     if (axis) {
@@ -154,8 +195,22 @@ export function composeLayers(
       texture = opt.t
     }
     if (def.k === 'tame' && !tint) continue
+
+    /**
+     * @constraint 幼年换算必须放在品种轴之后：两个轴是叠加的，
+     *      猫选了「三花」再切幼年，要的是 cat_calico_baby 而不是默认那张。
+     *      图层几何也要换（羊毛层在幼年体上是 sheep_baby:wool），
+     *      只换贴图会让羊毛按成年尺寸糊在幼年羊身上。
+     */
+    let rigKey = def.m
+    if (baby) {
+      const over = baby.layers?.[def.c]
+      if (over?.m) rigKey = over.m
+      texture = baby.tex?.[texture] ?? over?.t ?? texture
+    }
+
     out.push({
-      rig: rigOf(def.m, pool, byLayer),
+      rig: rigOf(rigKey, pool, byLayer),
       texture,
       cls: def.c,
       tint: def.d ? (tint ?? (def.k === 'wool' ? [1, 1, 1] : undefined)) : undefined,
@@ -164,3 +219,14 @@ export function composeLayers(
   }
   return out
 }
+
+/** 该实体有没有幼年形态，以及幼年的几何/类名 */
+export function sizeOf(file: LayerFile | null, entity: string): SizeDef | null {
+  return file?.sizes?.[entity] ?? null
+}
+
+/** 当前选择是否是幼年体 */
+export function isBaby(choice: Record<string, string>): boolean {
+  return choice.size === 'baby'
+}
+

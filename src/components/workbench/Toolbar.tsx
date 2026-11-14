@@ -1,6 +1,7 @@
 import { Link } from 'react-router-dom'
 import { RedoIcon, UndoIcon } from '@/components/icons'
 import type { ExportBackdrop } from '@/lib/containerRender'
+import type { ExportTarget } from '@/lib/export/registry'
 
 /**
  * 工作台顶栏。
@@ -28,9 +29,9 @@ export interface ToolbarProps {
   busy: string | null
   backdrop: ExportBackdrop
   onBackdrop: (value: ExportBackdrop) => void
-  onExportPng: () => void
-  onExportPsd: () => void
-  onExportJson: () => void
+  /** 当前画布能导出的全部格式，来自导出注册表 */
+  exportTargets: ExportTarget[]
+  onExport: (target: ExportTarget) => void
   onImport: (file: File) => void
   confirmClear: boolean
   onClear: () => void
@@ -51,9 +52,8 @@ export function Toolbar(props: ToolbarProps) {
     busy,
     backdrop,
     onBackdrop,
-    onExportPng,
-    onExportPsd,
-    onExportJson,
+    exportTargets,
+    onExport,
     onImport,
     confirmClear,
     onClear,
@@ -127,18 +127,18 @@ export function Toolbar(props: ToolbarProps) {
         <details className="menu">
           <summary className="btn">{busy ? '导出中…' : '导出'}</summary>
           <div className="menu__list">
-            <button type="button" onClick={onExportPng} disabled={!!busy}>
-              PNG 图片
-              <span>扁平图，直接发出去</span>
-            </button>
-            <button type="button" onClick={onExportPsd} disabled={!!busy}>
-              PSD 分层
-              <span>背景 / 状态 / 物品 / 文字各一层</span>
-            </button>
-            <button type="button" onClick={onExportJson}>
-              布局 JSON
-              <span>可以再导回来继续改</span>
-            </button>
+            {exportTargets.map((target) => (
+              <button
+                key={target.id}
+                type="button"
+                onClick={() => onExport(target)}
+                disabled={!!busy}
+                title={target.hint}
+              >
+                {target.label}
+                <span>{target.hint}</span>
+              </button>
+            ))}
             <div className="menu__split">
               <span className="menu__label">底色</span>
               {(['transparent', 'dark', 'light'] as ExportBackdrop[]).map((value) => (

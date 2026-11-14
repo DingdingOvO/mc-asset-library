@@ -22,6 +22,8 @@ const MIME: Record<string, string> = {
   '.glsl': 'text/plain; charset=utf-8',
   '.ttf': 'font/ttf',
   '.zip': 'application/zip',
+  // 建筑结构：原版 .nbt 是 gzip 后的二进制，浏览器当二进制流取
+  '.nbt': 'application/octet-stream',
 }
 
 export function mcAssetsPlugin(

@@ -18,7 +18,7 @@ import {
 import { useAsync } from '@/lib/useAsync'
 import { useLibrary } from '@/lib/useLibrary'
 import { usePaged } from '@/lib/usePaged'
-import { tipAttrs } from '@/components/GlobalTooltip'
+import { tipAttrs } from '@/lib/tip'
 
 export default function Entities() {
   const { version, loading, error } = useLibrary()
@@ -37,6 +37,14 @@ interface Prepared {
   layer: string
   texture: string
   shadow: number | null
+  /** 幼年形态：独立的骨架、动作类与贴图换算表 */
+  baby: {
+    rig: Rig
+    poser: Poser
+    modelClass: string
+    texture: string
+    tex: Record<string, string>
+  } | null
 }
 
 /**
@@ -103,6 +111,28 @@ function EntityBrowser({ version }: { version: string }) {
       const rig = buildRig(hit.model)
       const poser = createPoser(hit.cls, rig, anim)
       const texture = info?.t[0] ?? ALIAS[id]?.texture ?? hit.model.texture ?? ''
+
+      /**
+       * 幼年形态。
+       * @why 骨架必须在准备阶段就建好：`buildRig` 要走一遍 263 个模型的层级展开，
+       *      放进 subjectOf 就是每次切体型都重建一次，弹窗会卡半秒。
+       * @constraint 找不到幼年几何（驴、骡、远古守卫者）时只换贴图，
+       *      不能整只退回成年——那会让人以为点了没反应。
+       */
+      const size = layerFile.data?.sizes?.[id]
+      let baby: Prepared['baby'] = null
+      if (size) {
+        const babyModel = size.m ? pool[size.m] : null
+        const babyRig = babyModel ? buildRig(babyModel) : rig
+        baby = {
+          rig: babyRig,
+          poser: createPoser(size.c ?? null, babyRig, anim),
+          modelClass: size.c ?? '',
+          texture: size.t ?? texture,
+          tex: size.tex ?? {},
+        }
+      }
+
       map.set(id, {
         rig,
         poser,
@@ -111,10 +141,11 @@ function EntityBrowser({ version }: { version: string }) {
         layer: hit.layer,
         texture,
         shadow: info?.s ?? null,
+        baby,
       })
     }
     return map
-  }, [models.data, anims.data, renderers.data, data])
+  }, [models.data, anims.data, renderers.data, data, layerFile.data])
 
   const [params, setParams] = useSearchParams()
   const [selected, setSelected] = useState<RegistryEntry | null>(null)
@@ -133,12 +164,18 @@ function EntityBrowser({ version }: { version: string }) {
     (hit: Prepared, id: string, pick: Record<string, string>): Subject => {
       const axis = layerFile.data?.axes[id]?.find((item) => item.k === 'base')
       const picked = pick.base
-      const texture =
+      const adultTexture =
         axis?.opts?.find((opt) => opt.k === picked && opt.t)?.t ?? hit.texture
+      /**
+       * @constraint 贴图换算要在品种之后：猫选了「三花」再切幼年，要的是
+       *      cat_calico_baby。换算表没命中就沿用当前贴图（僵尸幼年与成年同皮）。
+       */
+      const baby = pick.size === 'baby' ? hit.baby : null
+      const texture = baby ? (baby.tex[adultTexture] ?? baby.texture) : adultTexture
       return {
         kind: 'entity',
-        rig: hit.rig,
-        poser: hit.poser,
+        rig: baby ? baby.rig : hit.rig,
+        poser: baby ? baby.poser : hit.poser,
         texture,
         layers: composeLayers(id, layerFile.data ?? null, pick, pool, byLayer),
       }

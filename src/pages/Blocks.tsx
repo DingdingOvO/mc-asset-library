@@ -8,7 +8,7 @@ import { loadRegistries } from '@/lib/registries'
 import { useAsync } from '@/lib/useAsync'
 import { useLibrary } from '@/lib/useLibrary'
 import { useVirtualGrid } from '@/lib/useVirtualGrid'
-import { tipAttrs } from '@/components/GlobalTooltip'
+import { tipAttrs } from '@/lib/tip'
 
 interface BlockEntry {
   id: string
@@ -54,12 +54,15 @@ function BlockBrowser({ version }: { version: string }) {
    *      数据落地与是否挂载无关，只有 setState 需要在意。
    */
   const mounted = useRef(true)
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    // @constraint 必须在 setup 里置回 true。StrictMode 下 effect 会走
+    //      setup → cleanup → setup 一轮，只在 cleanup 里置 false 的话，
+    //      开发环境整页永远停在占位（数据取回来了也不敢 setState）。
+    mounted.current = true
+    return () => {
       mounted.current = false
-    },
-    [],
-  )
+    }
+  }, [])
 
   // 换版本等于换一整套数据，旧分片的 key 全部失效
   useEffect(() => {
