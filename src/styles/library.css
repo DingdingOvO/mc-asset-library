@@ -2772,7 +2772,12 @@ button:disabled,
 
 .struct__canvas {
   width: 100%;
-  max-width: 768px;
+  /**
+   * @constraint 上限同时受视口高度与绝对尺寸约束：正方形画布只按容器宽度
+   *      铺满的话，宽屏上会长到 1100+ 像素高，把状态行和滚动条一起推出视口。
+   *      视口矮时按 100vh 退回，宽屏时停在 900 不再变大。
+   */
+  max-width: min(100%, calc(100vh - 260px), 900px);
   height: auto;
   aspect-ratio: 1 / 1;
   cursor: grab;

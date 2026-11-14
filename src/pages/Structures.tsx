@@ -105,6 +105,42 @@ function blockIdsOf(volume: BlockVolume): string[] {
   return [...ids]
 }
 
+/**
+ * 实心方块的包围盒（体积坐标，max 为开区间）。
+ *
+ * @why 取景必须按内容算，不能按体积算。体积为了容纳高塔预留了 12 格净空，
+ *      按体积取中点会把枢轴抬到建筑上方——画面里建筑整体沉到下半区；
+ *      按体积算跨度又会把净空算进去，小帐篷缩成画面三分之一。
+ * @constraint 不跳过空气的话包围盒恒等于体积，等于没算。
+ */
+function contentBounds(volume: BlockVolume): { min: [number, number, number]; max: [number, number, number] } {
+  const [sx, sy, sz] = volume.size
+  let minX = Infinity
+  let minY = Infinity
+  let minZ = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  let maxZ = -Infinity
+
+  for (let y = 0; y < sy; y += 1) {
+    for (let z = 0; z < sz; z += 1) {
+      for (let x = 0; x < sx; x += 1) {
+        if ((volume.data[(y * sz + z) * sx + x] ?? 0) === 0) continue
+        if (x < minX) minX = x
+        if (y < minY) minY = y
+        if (z < minZ) minZ = z
+        if (x > maxX) maxX = x
+        if (y > maxY) maxY = y
+        if (z > maxZ) maxZ = z
+      }
+    }
+  }
+
+  // 空体积（结构文件只有空气）退化成整块，至少不会出现 Infinity 传进矩阵
+  if (minX === Infinity) return { min: [0, 0, 0], max: volume.size }
+  return { min: [minX, minY, minZ], max: [maxX + 1, maxY + 1, maxZ + 1] }
+}
+
 export function Structures() {
   const { version, loading, error } = useLibrary()
   const index = useAsync(`structures:${version ?? ''}`, () =>
@@ -185,7 +221,8 @@ interface PreviewProps {
 interface Prepared {
   batches: VoxelBatch[]
   span: number
-  center: [number, number, number]
+  /** 转台枢轴（体积坐标），取内容包围盒中心 */
+  pivot: [number, number, number]
 }
 
 function StructurePreview({ path, version }: PreviewProps) {
@@ -193,6 +230,8 @@ function StructurePreview({ path, version }: PreviewProps) {
   const [status, setStatus] = useState('准备中…')
   const [pose, setPose] = useState({ rotX: 22, rotY: 40, zoom: 1 })
   const [prepared, setPrepared] = useState<Prepared | null>(null)
+  /** 绘制缓冲边长（物理像素）。按容器实测尺寸 × DPR 算，写死会在高分屏上糊 */
+  const [size, setSize] = useState(768)
 
   const template = useAsync(`${version}|${path ?? ''}`, () =>
     path ? loadStructure(version, path) : Promise.resolve(null),
@@ -200,6 +239,30 @@ function StructurePreview({ path, version }: PreviewProps) {
 
   const scene = useMemo(() => (template.data ? composeVolume(template.data) : null), [template.data])
   const ids = useMemo(() => (scene ? blockIdsOf(scene) : []), [scene])
+
+  /**
+   * 绘制缓冲跟随容器。
+   * @constraint 不能只在挂载时量一次：侧栏是 grid 里的一列，窗口缩放、
+   *      字体加载完成都会改它的宽度，量一次之后 canvas 会一直停在旧尺寸上。
+   *      DPR 上限取 2——结构动辄几千个三角形，3 倍屏再乘 9 倍像素不值。
+   */
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas) return
+    const apply = () => {
+      const rect = canvas.getBoundingClientRect()
+      const dpr = Math.min(window.devicePixelRatio || 1, 2)
+      const next = Math.max(240, Math.round(Math.min(rect.width, rect.height || rect.width) * dpr))
+      if (next === canvas.width) return
+      canvas.width = next
+      canvas.height = next
+      setSize(next)
+    }
+    apply()
+    const observer = new ResizeObserver(apply)
+    observer.observe(canvas)
+    return () => observer.disconnect()
+  }, [])
 
   // 一：装配网格（只在场景变化时跑一次）
   useEffect(() => {
@@ -219,7 +282,10 @@ function StructurePreview({ path, version }: PreviewProps) {
       const batches = buildVoxelBatches(scene, geometry)
       await modelPipeline().prepareTextures(texturesOf(ids, models), version)
       if (!alive) return
-      const [sx, sy, sz] = scene.size
+      const { min, max } = contentBounds(scene)
+      const dx = max[0] - min[0]
+      const dy = max[1] - min[1]
+      const dz = max[2] - min[2]
       /**
        * @constraint 取景跨度不能用三维对角线。对角线算的是「从角到角」，
        *      而屏幕上看到的是投影：一栋 13×23×13 的塔对角线 29 格，
@@ -229,8 +295,8 @@ function StructurePreview({ path, version }: PreviewProps) {
        */
       setPrepared({
         batches,
-        span: Math.max(Math.hypot(sx, sz), sy) * 1.05,
-        center: [sx / 2, sy / 2, sz / 2],
+        span: Math.max(Math.hypot(dx, dz), dy) * 1.05,
+        pivot: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2],
       })
       const triangles = batches.reduce((n, batch) => n + batch.vertexCount / 3, 0)
       setStatus(`${batches.length} 张贴图 · ${Math.round(triangles).toLocaleString()} 个三角形`)
@@ -242,19 +308,23 @@ function StructurePreview({ path, version }: PreviewProps) {
     }
   }, [scene, ids, version])
 
-  // 二：渲染（姿态或网格变化都重画）
+  // 二：渲染（姿态、网格或画布尺寸变化都重画）
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !prepared) return
     modelPipeline().renderWorld(
       canvas,
-      `${path}|${prepared.batches.reduce((n, batch) => n + batch.vertexCount, 0)}|${canvas.width}`,
+      /**
+       * @constraint 键里不能带画布尺寸。改了尺寸只是换个 viewport，网格本身
+       *      一格没动；带上尺寸会让每次窗口缩放都重新上传一遍全部顶点。
+       */
+      `${path}|${prepared.batches.reduce((n, batch) => n + batch.vertexCount, 0)}`,
       prepared.batches,
       {
-        size: canvas.width,
+        size,
         rotX: pose.rotX,
         rotY: pose.rotY,
-        pivot: prepared.center,
+        pivot: prepared.pivot,
         fit: 'auto',
         span: prepared.span,
         zoom: pose.zoom,
@@ -264,7 +334,7 @@ function StructurePreview({ path, version }: PreviewProps) {
       },
       version,
     )
-  }, [prepared, pose, path, version])
+  }, [prepared, pose, path, version, size])
 
   // 拖拽旋转
   useEffect(() => {
@@ -317,7 +387,7 @@ function StructurePreview({ path, version }: PreviewProps) {
 
   return (
     <div className="struct__stage">
-      <canvas ref={canvasRef} className="struct__canvas" width={768} height={768} />
+      <canvas ref={canvasRef} className="struct__canvas" width={size} height={size} />
       <p className="struct__status">{template.loading ? '读取结构文件…' : status}</p>
     </div>
   )
