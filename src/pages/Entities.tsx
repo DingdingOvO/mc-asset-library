@@ -18,6 +18,7 @@ import {
 import { useAsync } from '@/lib/useAsync'
 import { useLibrary } from '@/lib/useLibrary'
 import { usePaged } from '@/lib/usePaged'
+import { tipAttrs } from '@/components/GlobalTooltip'
 
 export default function Entities() {
   const { version, loading, error } = useLibrary()
@@ -258,7 +259,7 @@ function EntityBrowser({ version }: { version: string }) {
               type="button"
               className="tex-cell"
               aria-pressed={selected?.id === entry.id}
-              title={`${entry.n}\n${entry.id}`}
+              {...tipAttrs(entry.n, undefined, entry.id)}
               onPointerEnter={() => setHovered(entry.id)}
               onPointerLeave={() => setHovered((value) => (value === entry.id ? null : value))}
               onClick={() => setSelected(entry)}

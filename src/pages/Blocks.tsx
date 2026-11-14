@@ -8,6 +8,7 @@ import { loadRegistries } from '@/lib/registries'
 import { useAsync } from '@/lib/useAsync'
 import { useLibrary } from '@/lib/useLibrary'
 import { useVirtualGrid } from '@/lib/useVirtualGrid'
+import { tipAttrs } from '@/components/GlobalTooltip'
 
 interface BlockEntry {
   id: string
@@ -240,7 +241,7 @@ function BlockBrowser({ version }: { version: string }) {
                 type="button"
                 className="block-cell"
                 aria-pressed={selected === block.id}
-                title={`${block.n}\n${block.id}`}
+                {...tipAttrs(block.n, undefined, block.id)}
                 onClick={() => setSelected(block.id)}
               >
                 {subject ? (

@@ -9,6 +9,7 @@ import { textureSrc } from '@/lib/mc'
 import { useAsync } from '@/lib/useAsync'
 import { useLibrary } from '@/lib/useLibrary'
 import { useVirtualGrid } from '@/lib/useVirtualGrid'
+import { tipAttrs } from '@/components/GlobalTooltip'
 
 export default function Items() {
   const { group = 'all' } = useParams()
@@ -240,7 +241,7 @@ function ItemBrowser({ version, group }: { version: string; group: string }) {
                 type="button"
                 className="block-cell"
                 aria-pressed={selected?.id === item.id}
-                title={`${item.n}\n${item.id}`}
+                {...tipAttrs(item.n, undefined, item.id)}
                 onClick={() => setSelected(item)}
               >
                 {subject ? (

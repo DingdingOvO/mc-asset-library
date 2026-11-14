@@ -6,6 +6,7 @@ import { loadTextures, textureSrc, type Texture } from '@/lib/mc'
 import { useAsync } from '@/lib/useAsync'
 import { useLibrary } from '@/lib/useLibrary'
 import { usePaged } from '@/lib/usePaged'
+import { tipAttrs } from '@/components/GlobalTooltip'
 
 export default function Browse() {
   const { group = 'all' } = useParams()
@@ -119,7 +120,7 @@ function TextureBrowser({ version, group }: { version: string; group: string }) 
               type="button"
               className="tex-cell"
               aria-pressed={selected?.p === texture.p}
-              title={`${texture.n}\ntextures/${texture.p}.png`}
+              {...tipAttrs(texture.n, undefined, `textures/${texture.p}.png`)}
               onClick={() => setSelected(texture)}
             >
               <img

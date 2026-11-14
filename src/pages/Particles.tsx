@@ -8,6 +8,7 @@ import { loadParticles, type ParticleDef } from '@/lib/particles'
 import { useAsync } from '@/lib/useAsync'
 import { useLibrary } from '@/lib/useLibrary'
 import { useVirtualGrid } from '@/lib/useVirtualGrid'
+import { tipAttrs } from '@/components/GlobalTooltip'
 
 export default function Particles() {
   const { version, loading, error } = useLibrary()
@@ -78,7 +79,7 @@ function ParticleBrowser({ version }: { version: string }) {
               type="button"
               className="particle-cell"
               aria-pressed={selected === item.id}
-              title={`${item.id}\n${item.c ?? '未注册到具体类'}`}
+              {...tipAttrs(item.id, undefined, item.c ?? '未注册到具体类')}
               onClick={() => setSelected(item.id)}
             >
               <ParticleThumb version={version} def={item} size={64} />

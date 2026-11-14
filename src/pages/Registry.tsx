@@ -13,6 +13,7 @@ import {
 import { useAsync } from '@/lib/useAsync'
 import { useLibrary } from '@/lib/useLibrary'
 import { usePaged } from '@/lib/usePaged'
+import { tipAttrs } from '@/components/GlobalTooltip'
 
 export default function Registry() {
   const { id = '' } = useParams()
@@ -120,7 +121,7 @@ function RegistryBrowser({ version, registryId }: { version: string; registryId:
                 type="button"
                 className="tex-cell"
                 aria-pressed={selected?.id === entry.id}
-                title={`${entry.n}\n${entry.id}`}
+                {...tipAttrs(entry.n, undefined, entry.id)}
                 onClick={() => void open(entry)}
               >
                 {entry.i ? (
