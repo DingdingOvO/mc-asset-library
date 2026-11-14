@@ -111,8 +111,14 @@ function SoundBrowser({ version }: { version: string }) {
     void audio
       .play()
       .then(() => setPlaying(id))
-      .catch(() => {
+      .catch((error: unknown) => {
         setPlaying(null)
+        /**
+         * @constraint NotAllowedError 是浏览器的自动播放策略（页面还没拿到
+         *      用户手势），不是文件缺失。把它也当成「部署版没带音频」会冤枉
+         *      一个功能完好的站点——自动化测试里就复现过这种假阳性。
+         */
+        if (error instanceof DOMException && error.name === 'NotAllowedError') return
         setAudioMissing(true)
       })
   }
