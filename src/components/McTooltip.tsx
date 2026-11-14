@@ -74,7 +74,7 @@ export function McTooltip({ tip, version }: { tip: TipState | null; version: str
 
   const place = useMemo(() => {
     if (!box) return null
-    return placeTooltip(tip?.x ?? 0, tip?.y ?? 0, box, window.innerWidth, window.innerHeight)
+    return placeTooltip(tip?.x ?? 0, tip?.y ?? 0, box, window.innerWidth, window.innerHeight, GUI_SCALE)
   }, [box, tip])
 
   useLayoutEffect(() => {
@@ -91,7 +91,7 @@ export function McTooltip({ tip, version }: { tip: TipState | null; version: str
     <canvas
       ref={canvasRef}
       className="mc-tip-canvas"
-      style={{ left: place.x - INSET, top: place.y - INSET }}
+      style={{ left: place.x - INSET * GUI_SCALE, top: place.y - INSET * GUI_SCALE }}
       role="tooltip"
       aria-label={lines.map((line) => line.text).join(' ')}
     />

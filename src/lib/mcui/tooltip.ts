@@ -52,10 +52,13 @@ export function measureTooltip(font: GlyphFont, lines: TipLine[]): TipSize {
 }
 
 /**
- * 按原版规则算内容左上角。
+ * 按原版规则算内容左上角，返回 **CSS 像素**坐标。
  *
- * @constraint 返回的是**内容**坐标（背景要再往外扩 12），不是背景坐标。
- *      混用会让提示框整体偏移一圈 padding，贴边时提前翻转。
+ * @constraint 屏幕尺寸、鼠标位置是 CSS 像素，而 MOUSE_OFFSET / padding 都是
+ *      GUI 像素——原版整个 `renderTooltipInternal` 跑在 GUI 坐标系里，屏幕尺寸
+ *      是先除以 guiScale 的。两边直接加会在 2 倍界面下把判定阈值放大一倍：
+ *      提示框已经压到窗口边缘了，`x + width > screenWidth` 还是 false，
+ *      于是永远不翻转，右边最后二十来个像素被切掉。
  */
 export function placeTooltip(
   pointerX: number,
@@ -63,13 +66,17 @@ export function placeTooltip(
   size: TipSize,
   screenW: number,
   screenH: number,
+  guiScale = 1,
 ): { x: number; y: number } {
-  let x = pointerX + MOUSE_OFFSET
-  let y = pointerY - MOUSE_OFFSET
-  if (x + size.boxWidth > screenW) x = Math.max(x - 24 - size.boxWidth, 4)
+  const scale = guiScale > 0 ? guiScale : 1
+  const sw = screenW / scale
+  const sh = screenH / scale
+  let x = pointerX / scale + MOUSE_OFFSET
+  let y = pointerY / scale - MOUSE_OFFSET
+  if (x + size.boxWidth > sw) x = Math.max(x - 24 - size.boxWidth, 4)
   const paddedHeight = size.boxHeight + 3
-  if (y + paddedHeight > screenH) y = screenH - paddedHeight
-  return { x: Math.round(x), y: Math.round(y) }
+  if (y + paddedHeight > sh) y = sh - paddedHeight
+  return { x: Math.round(x * scale), y: Math.round(y * scale) }
 }
 
 export interface TipSprites {
