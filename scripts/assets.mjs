@@ -459,6 +459,48 @@ async function cmdPack() {
   await mkdir(mcDir, { recursive: true })
   await cp(derivedDir, mcDir, { recursive: true, force: true })
 
+  /**
+   * 音效计数以实际分发的清单为准。
+   *
+   * @why CI 用 `--no-sounds` 提取素材，.ogg 不落盘，fetch-assets 是按磁盘文件
+   *      统计音效数的，于是 versions.json 里 soundCount 成了 0。而 derived 的
+   *      sounds.json 是入库清单，条目数照旧打进站点。结果是首页写「音效 0 个」、
+   *      音效页却列着 4961 条，同一份数据两个数。
+   * @constraint 不能改成让首页去读 sounds.json 自己数：那是 515KB，首页只需要
+   *      一个数字，registrySummary 存在的意义就是别为计数拉整份清单。
+   */
+  const versionsOut = path.join(outDir, 'mc', 'versions.json')
+  const soundsList = path.join(mcDir, 'sounds.json')
+  if ((await exists(versionsOut)) && (await exists(soundsList))) {
+    try {
+      const manifest = JSON.parse(await readFile(soundsList, 'utf8'))
+      const total = Array.isArray(manifest.items) ? manifest.items.length : 0
+      // 音频是否真的随包分发：决定首页敢不敢写「可试听」
+      const audio = await readdir(path.join(mcDir, 'sounds')).then(
+        (names) => (names.length > 0 ? 1 : 0),
+        () => 0,
+      )
+      if (total > 0) {
+        const all = JSON.parse(await readFile(versionsOut, 'utf8'))
+        const entry = (all.versions ?? []).find((item) => item.id === version)
+        if (entry) {
+          const summary = entry.registrySummary ?? []
+          const row = summary.find((item) => item.id === 'sounds')
+          if (row) {
+            row.count = total
+            row.audio = audio
+          } else {
+            summary.push({ id: 'sounds', label: '音效', kind: 'asset', count: total, route: '/sounds', audio })
+          }
+          entry.registrySummary = summary
+          await writeFile(versionsOut, JSON.stringify(all))
+        }
+      }
+    } catch {
+      // @why 清单结构异常时保持原样。首页少一个数字可以接受，为此中断部署不行
+    }
+  }
+
   // @why 构建插件已经生成过；这里兜底，避免旧 dist 没有 404.html 时静态托管深链接直接断
   const notFound = path.join(outDir, '404.html')
   if (!(await exists(notFound))) await copyFile(path.join(outDir, 'index.html'), notFound)

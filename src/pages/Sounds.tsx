@@ -47,6 +47,13 @@ function SoundBrowser({ version }: { version: string }) {
   const [params, setParams] = useSearchParams()
 
   const [playing, setPlaying] = useState<string | null>(null)
+  /**
+   * @constraint Pages 部署版为了压体积带了 `--no-sounds`，.ogg 全部缺席，
+   *      点播放会 404。原来的 catch 只是把按钮弹回未播放状态，用户看到的是
+   *      "点了没反应"，会以为网站坏了。这里把失败原因显式说出来，并且只提示
+   *      一次（一个 404 就足以说明整站音频都没带）。
+   */
+  const [audioMissing, setAudioMissing] = useState(false)
   const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const query = params.get('q') ?? ''
@@ -104,7 +111,10 @@ function SoundBrowser({ version }: { version: string }) {
     void audio
       .play()
       .then(() => setPlaying(id))
-      .catch(() => setPlaying(null))
+      .catch(() => {
+        setPlaying(null)
+        setAudioMissing(true)
+      })
   }
 
   const activeLabel = group === 'all' ? '全部音效' : (GROUP_LABELS[group] ?? group)
@@ -166,6 +176,12 @@ function SoundBrowser({ version }: { version: string }) {
       </div>
 
       {error && <p className="notice notice--error">索引加载失败：{error.message}</p>}
+      {audioMissing && (
+        <p className="notice">
+          当前部署版没有随包发布音频文件（原版 369MB 的 .ogg 超出静态站体积预算），清单、音效名与事件 ID
+          照常可查，试听不可用。本地构建带上音效后即可播放。
+        </p>
+      )}
       {loading && <p className="empty">正在加载音效…</p>}
       {!loading && filtered.length === 0 && <p className="empty">没有匹配「{query}」的音效</p>}
 

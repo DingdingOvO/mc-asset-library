@@ -35,6 +35,8 @@ export interface McVersion {
     kind?: 'registry' | 'asset'
     count: number
     route: string
+    /** 仅音效用：1 表示 .ogg 随包分发，首页才敢写「可试听」 */
+    audio?: number
   }[]
 }
 

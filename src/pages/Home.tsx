@@ -42,6 +42,12 @@ export default function Home() {
 
   const entityCount = pick('entities')
   const soundCount = pick('sounds')
+  /**
+   * @constraint 线上部署版（CI 带 --no-sounds）没有 .ogg，写「可试听」就是骗人。
+   *      标志由 pack 阶段按实际分发内容写进 registrySummary，别在前端猜。
+   */
+  const soundPlayable =
+    summary.find((entry) => entry.id === 'sounds')?.audio === 1
   const guiCount = current?.groups.find((group) => group.id === 'gui')?.count ?? 0
 
   return (
@@ -139,7 +145,9 @@ export default function Home() {
               </span>
               <span className="cat-card__text">
                 <span className="cat-card__name">音效</span>
-                <span className="cat-card__count">{soundCount} 个 · 可试听</span>
+                <span className="cat-card__count">
+                  {soundCount} 个 · {soundPlayable ? '可试听' : '清单'}
+                </span>
               </span>
             </Link>
             <Link to="/browse" className="cat-card">
