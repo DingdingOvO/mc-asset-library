@@ -1985,7 +1985,9 @@ button:disabled,
   right: 0;
   top: calc(100% + 4px);
   z-index: 60;
-  min-width: 208px;
+  /* @constraint 244 是「底色」+ 三个 chip + 两处 padding 的实测宽度。
+     写 208 时第三颗 chip 会被右边缘裁掉，只能看到「透明」「深色」。 */
+  min-width: 244px;
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -2024,20 +2026,30 @@ button:disabled,
 
 .menu__split {
   display: flex;
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 2px;
+  gap: 3px;
   margin-top: 4px;
   padding: 4px 8px 2px;
   border-top: 1px solid var(--border);
 }
 
+/* @constraint 必须 nowrap。菜单宽 208px，三个 chip 已经吃掉 150px，
+   标签一旦允许换行就会变成竖排的「底 / 色」，把 chip 挤到第二行。 */
 .menu__label {
   margin-right: auto;
+  white-space: nowrap;
   font-size: 11.5px;
   color: var(--text-muted);
 }
 
+/* @constraint 必须把 width 拉回 auto。`.menu__list button` 给了 `width:100%`
+   和 `flex-direction:column`（整行可点的大按钮），底色 chips 也命中那条规则，
+   于是每颗 chip 都占满一行、互相挤出菜单外。 */
 .menu__split .chip {
+  width: auto;
+  flex: 0 0 auto;
+  flex-direction: row;
   padding: 3px 7px;
   border-radius: 4px;
   color: var(--text-muted);
