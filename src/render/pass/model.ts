@@ -42,6 +42,8 @@ export interface ModelBatch {
   biased: boolean
   /** 满亮层。方块路径恒为 false，留字段是为了和实体批对齐 */
   emissive: boolean
+  /** 贴图带透明像素，需要 cutout 程序（体素路径用） */
+  cutout?: boolean
 }
 
 /** 光照坐标：展示场景恒为满亮（方块光 15、天空光 15） */

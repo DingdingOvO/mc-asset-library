@@ -5,6 +5,7 @@ import Home from '@/pages/Home'
 import Blocks from '@/pages/Blocks'
 import Entities from '@/pages/Entities'
 import Ui from '@/pages/Ui'
+import { Structures } from '@/pages/Structures'
 import Items from '@/pages/Items'
 import Data from '@/pages/Data'
 import Registry from '@/pages/Registry'
@@ -27,6 +28,7 @@ export default function App() {
           <Route path="items" element={<Items />} />
           <Route path="items/:group" element={<Items />} />
           <Route path="entities" element={<Entities />} />
+          <Route path="structures" element={<Structures />} />
           <Route path="particles" element={<Particles />} />
           <Route path="ui" element={<Ui />} />
           <Route path="data" element={<Data />} />

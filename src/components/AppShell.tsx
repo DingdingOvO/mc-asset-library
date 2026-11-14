@@ -26,6 +26,9 @@ export function AppShell() {
           <NavLink to="/particles" className="topbar__link">
             粒子
           </NavLink>
+          <NavLink to="/structures" className="topbar__link">
+            结构
+          </NavLink>
           <NavLink to="/ui" className="topbar__link">
             界面
           </NavLink>

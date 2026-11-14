@@ -2709,3 +2709,93 @@ button:disabled,
     grid-template-rows: auto minmax(260px, 48vh) auto;
   }
 }
+
+/* ---------------------------------------------------------------- 结构页 */
+/* @why 左右两栏各自滚动。结构列表有两百多项，跟着整页滚会让预览区跑出屏幕，
+   用户每换一个结构都要重新滚回来。 */
+.struct {
+  display: grid;
+  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+  margin-top: 18px;
+}
+
+.struct__list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  max-height: calc(100vh - 280px);
+  overflow-y: auto;
+  border: 1px solid var(--border);
+}
+
+.struct__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 7px 10px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.struct__item:hover {
+  background: var(--surface-muted);
+}
+
+.struct__item--on {
+  background: var(--surface-muted);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.struct__name {
+  font-size: 13px;
+  color: var(--text);
+}
+
+.struct__meta {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.struct__stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.struct__canvas {
+  width: 100%;
+  max-width: 768px;
+  height: auto;
+  aspect-ratio: 1 / 1;
+  cursor: grab;
+  touch-action: none;
+  background: transparent;
+}
+
+.struct__canvas:active {
+  cursor: grabbing;
+}
+
+.struct__status {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+@media (max-width: 760px) {
+  .struct {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .struct__list {
+    max-height: 240px;
+  }
+}

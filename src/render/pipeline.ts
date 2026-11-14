@@ -210,6 +210,98 @@ export class ModelPipeline {
   }
 
   /**
+   * 画一块体素世界（地形 + 建筑）。
+   *
+   * @constraint 顶点已经是「格」为单位，`unitsPerBlock` 必须传 1。
+   *      忘了传会让 32 格宽的城堡渲染成 2 格——因为默认按 16 单位一格归一化。
+   */
+  renderWorld(
+    target: HTMLCanvasElement,
+    key: string,
+    batches: { texture: string; data: Uint8Array; vertexCount: number; cutout: boolean }[],
+    camera: ModelCamera,
+    version: string,
+  ): RenderStats {
+    const entry = this.voxelEntry(key, batches, version)
+    const { ctx } = this
+    const gl = ctx.gl
+
+    ctx.resize(camera.size, camera.size)
+    this.renderer.begin([0, 0, 0, 0])
+    const { view, proj, frame } = this.frameFor(camera)
+
+    const calls: DrawCall[] = []
+    entry.meshes.forEach((batch, index) => {
+      if (batch.vertexCount === 0) return
+      const texture = this.cache.peek(textureSrc(version, batch.texture))
+      entry.textures[index] = texture
+      calls.push({
+        // 有透明像素的贴图（树叶、玻璃、草）走 cutout，其余用纯不透明程序，
+        // 后者能让 GPU 跳过 discard 分支，量大的地形快一截
+        program: 'cutout' in batch && batch.cutout ? this.blockCutout : this.blockOpaque,
+        mesh: entry.buffers[index]!,
+        texture,
+        chunkPos: [0, 0, 0],
+        vertexCount: batch.vertexCount,
+        order: index,
+      })
+    })
+
+    gl.viewport(0, 0, camera.size, camera.size)
+    this.renderer.draw(calls, { ...frame, modelViewMat: view, projMat: proj })
+    ctx.blitTo(target, camera.size, camera.size)
+    return entry.stats
+  }
+
+  private voxelEntry(
+    key: string,
+    batches: { texture: string; data: Uint8Array; vertexCount: number; cutout: boolean }[],
+    version: string,
+  ): MeshEntry {
+    const slot = `voxel|${key}`
+    const hit = this.entries.get(slot)
+    if (hit) return hit
+
+    const gl = this.ctx.gl
+    const buffers: MeshBuffer[] = []
+    const textures: (Texture | null)[] = []
+    let vertices = 0
+    const meshes: ModelBatch[] = []
+
+    for (const batch of batches) {
+      const buffer = new MeshBuffer(gl, BLOCK_LAYOUT)
+      buffer.upload(batch.data)
+      buffers.push(buffer)
+      textures.push(this.cache.peek(textureSrc(version, batch.texture)))
+      vertices += batch.vertexCount
+      meshes.push({
+        texture: batch.texture,
+        data: batch.data,
+        vertexCount: batch.vertexCount,
+        translucent: false,
+        biased: false,
+        emissive: false,
+        cutout: batch.cutout,
+      })
+    }
+
+    const entry: MeshEntry = {
+      kind: 'block',
+      meshes,
+      buffers,
+      textures,
+      stats: { batches: batches.length, vertices, triangles: vertices / 3 },
+    }
+    this.entries.set(slot, entry)
+    return entry
+  }
+
+  /** 载入世界用到的贴图 */
+  async prepareTextures(texIds: string[], version: string): Promise<void> {
+    await Promise.all(texIds.map((id) => this.cache.get(textureSrc(version, id))))
+  }
+
+  /**
    * 选程序。
    *
    * @constraint 方块的不透明批必须走 cutout：树叶、栅栏、铁栏杆都有
