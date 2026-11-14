@@ -6,6 +6,7 @@ import { entityFaces } from '@/lib/entityRig'
 import { blockAnimOf, blockFaces, type TextureAnim } from '@/lib/faceBuild'
 import { subscribeTicks } from '@/lib/animClock'
 import { textureSrc } from '@/lib/mc'
+import { modelPipeline } from '@/render'
 import {
   DEFAULT_ROTATION,
   ENTITY_ROTATION,
@@ -255,6 +256,33 @@ export function ModelView({
       : [...new Set((staticFaces ?? []).map((face) => face.tex))].join('|')
 
   /**
+   * 预载纹理，让 GPU 管线能接管。
+   *
+   * @why 渲染循环是同步的（rAF 里不能 await）。纹理没就绪时
+   *      `drawScene` 会自动回落 CPU 光栅化，等这批下载完再切到 GPU。
+   *      下载完成后必须标脏重绘一次，否则要等到用户拖动才会换成 GPU 版本。
+   */
+  useEffect(() => {
+    if (!textureKey) return
+    let alive = true
+    try {
+      void modelPipeline()
+        .prepare(textureKey.split('|'), version)
+        .then(() => {
+          if (alive) dirty.current = true
+        })
+        .catch(() => {
+          /* GPU 不可用，继续走 CPU 光栅化 */
+        })
+    } catch {
+      /* 同上 */
+    }
+    return () => {
+      alive = false
+    }
+  }, [textureKey, version])
+
+  /**
    * 转台枢轴：模型自己包围盒的中心。
    * @why 方块是 8,8,8 没错，但生物的原点在脚底、身高 32 甚至 40，绕 8 转就是
    *      绕着膝盖甩，拖动时整只生物在画面里画圈。
@@ -404,6 +432,17 @@ export function ModelView({
 
       const started = performance.now()
       trailFresh.current = false
+      /**
+       * @constraint 动画方块按帧号进键，动画实体走空键。
+       *      方块动画只有几帧，按帧缓存能省掉每帧的网格重建；
+       *      实体姿势每帧都不同，缓存等于每帧写一份新网格，只有坏处。
+       */
+      const gpuKey =
+        subject.kind === 'entity'
+          ? ''
+          : blockAnim
+            ? `${textureKey}|${Math.floor(Math.floor(elapsed * 20) / blockAnim.frametime) % blockAnim.steps}`
+            : textureKey
       drawScene(ctx, {
         faces,
         size: pixels,
@@ -421,6 +460,8 @@ export function ModelView({
         shadow: subject.kind === 'entity' ? 1 : 0.55,
         pivot,
         frame,
+        gpuKey,
+        shading: subject.kind === 'entity' ? 'entity' : 'block',
       })
 
       // 自适应：连续偏慢就降超采样，一直很快就不再降

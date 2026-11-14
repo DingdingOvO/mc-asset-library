@@ -12,6 +12,7 @@ import type { RasterFace, TexelSource } from './raster'
 import { rasterize } from './raster'
 import { textureSrc } from './mc'
 import { peekTexel } from './texel'
+import { hasWebGl, modelPipeline, type ModelFace } from '@/render'
 
 export type Vec3 = [number, number, number]
 
@@ -297,6 +298,14 @@ export interface ProjectResult {
   raster: RasterFace[]
   /** 模型在屏幕上的包围盒，用于摆阴影 */
   box: Box
+  /**
+   * 取景参数（相机空间）。
+   * @why GPU 管线需要它把模型的模型坐标直接送进矩阵，而这两个量
+   *      原本是 `projectFaces` 内部的局部变量。不暴露出来，GPU 那边
+   *      只能自己再算一遍，两份实现迟早会算出不同的取景框——
+   *      表现是切换渲染后端时模型突然跳一下大小。
+   */
+  camera: { centerX: number; centerY: number; span: number; k: number }
 }
 
 export function projectFaces(faces: Face3D[], options: ProjectOptions): ProjectResult {
@@ -337,7 +346,11 @@ export function projectFaces(faces: Face3D[], options: ProjectOptions): ProjectR
   }
 
   if (!Number.isFinite(minX)) {
-    return { raster: [], box: { x0: 0, y0: 0, x1: 0, y1: 0 } }
+    return {
+      raster: [],
+      box: { x0: 0, y0: 0, x1: 0, y1: 0 },
+      camera: { centerX: 0, centerY: 0, span: 1, k: pixelScale(size, fit, 1, zoom) },
+    }
   }
 
   const centerX = options.frame ? options.frame.cx : (minX + maxX) / 2
@@ -387,7 +400,11 @@ export function projectFaces(faces: Face3D[], options: ProjectOptions): ProjectR
     raster.push({ verts, source, light, tint: face.tint })
   }
 
-  return { raster, box: { x0: boxX0, y0: boxY0, x1: boxX1, y1: boxY1 } }
+  return {
+    raster,
+    box: { x0: boxX0, y0: boxY0, x1: boxX1, y1: boxY1 },
+    camera: { centerX, centerY, span, k },
+  }
 }
 
 /** 复用的离屏画布，避免每帧新建 */
@@ -588,11 +605,86 @@ export interface SceneOptions extends ProjectOptions {
    */
   resetTrail?: boolean
   /**
+   * 网格缓存键。
+   * @why 同一组面每帧都会传进来，但对象的身份每次都变（动画重建的）。
+   *      用内容长度当键会让"两个都是 240 面的不同模型"共用一个网格，
+   *      拖拽时模型会串。调用方知道自己在画哪个模型，交给它给键最稳。
+   */
+  gpuKey?: string
+  /**
+   * 着色路径。
+   * @constraint 实体必须和方块分开。方块的方向亮度是六档常量、烘焙进顶点色；
+   *      实体是两束方向光按法线做点积。混用会让其中一种失去立体感——
+   *      方块变成一片平色，或者实体变成一块块硬边。
+   */
+  shading?: 'block' | 'entity'
+  /**
    * 固定的阴影落点。
    * @why 阴影跟着当帧包围盒走，抬腿、扇翅膀都会让影子忽宽忽窄、上下跳；
    *      导出成视频后这个抖动比模型本身还显眼。锁死取景框时一并锁死它。
    */
   shadowBox?: Box
+}
+
+/**
+ * 用 GPU 管线画模型。
+ *
+ * @why 单独抽出来而不是内联进 `drawScene`：`drawScene` 还要处理阴影、
+ *      描边、运动模糊、拖尾四种 2D 后处理，那些逻辑和渲染后端无关，
+ *      混在一起会让"换成 GPU"这件事看起来像重写了整个绘制流程。
+ *
+ * @return 是否真的用 GPU 画了。false 表示调用方需要回落 CPU 光栅化。
+ */
+function paintGpu(
+  layer: CanvasRenderingContext2D,
+  faces: Face3D[],
+  options: SceneOptions,
+  camera: { centerX: number; centerY: number; span: number; k: number },
+): boolean {
+  // 调试用：`?cpu=1` 强制走 CPU 光栅化，用来逐像素对比两条路径
+  if (typeof location !== 'undefined' && location.search.includes('cpu=1')) return false
+  if (!hasWebGl()) return false
+
+  /**
+   * @constraint 整条 GPU 路径必须能失败而不能抛。着色器编译、上下文创建、
+   *      显存分配任何一步挂掉，都不应该让整页崩掉——用户看到的是一个
+   *      React 错误边界页面，而不是"模型用了慢一点的渲染方式"。
+   */
+  try {
+    const pipeline = modelPipeline()
+    if (!pipeline.ready(faces as ModelFace[], options.version)) return false
+    pipeline.render(
+      layer.canvas,
+      options.gpuKey ?? `f${faces.length}|${options.version}`,
+      faces as ModelFace[],
+      {
+        size: options.size,
+        rotX: options.rotX,
+        rotY: options.rotY,
+        pivot: options.pivot ?? [8, 8, 8],
+        display: options.display ?? null,
+        fit: options.fit ?? 'block',
+        span: camera.span,
+        center: [camera.centerX, camera.centerY],
+        zoom: options.zoom ?? 1,
+        light: options.light ?? 1,
+      },
+      options.version,
+      options.shading ?? 'block',
+    )
+    return true
+  } catch (error) {
+    warnOnce(error)
+    return false
+  }
+}
+
+/** 只报一次，避免几百个缩略图各刷一条控制台 */
+let warned = false
+function warnOnce(error: unknown): void {
+  if (warned) return
+  warned = true
+  console.warn('[render] GPU 管线不可用，回落到 CPU 光栅化：', error)
 }
 
 /**
@@ -607,7 +699,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, options: SceneOptions):
   if (options.clear !== false) ctx.clearRect(0, 0, size, size)
   if (faces.length === 0) return { x0: 0, y0: 0, x1: 0, y1: 0 }
 
-  const { raster, box } = projectFaces(faces, options)
+  const { raster, box, camera } = projectFaces(faces, options)
   const layer = getLayer(size)
 
   if (!layer) {
@@ -615,7 +707,14 @@ export function drawScene(ctx: CanvasRenderingContext2D, options: SceneOptions):
     return box
   }
 
-  rasterize(layer, size, size, raster, options.supersample ?? 2)
+  /**
+   * @constraint 纹理没全部就绪时必须回落 CPU。GPU 路径是同步的，
+   *      纹理还在下载时只能画白模——一整屏白方块比慢 5ms 难看得多。
+   *      预载由调用方负责（`preloadTextures`），这里只做就绪判定。
+   */
+  if (!paintGpu(layer, faces, options, camera)) {
+    rasterize(layer, size, size, raster, options.supersample ?? 2)
+  }
 
   const strength = options.shadow ?? 1
   const shadowBox = options.shadowBox ?? box
