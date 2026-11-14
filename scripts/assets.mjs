@@ -22,6 +22,7 @@ import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { copyFile, cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
+import { normalizeItemGroups } from './items-group.mjs'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const ASSETS_ROOT = path.join(ROOT, 'mc-assets')
@@ -44,9 +45,11 @@ const ROUTES = ['blocks', 'items', 'entities', 'particles', 'ui', 'data', 'brows
  *      就是「页面在但状态码 404」——贴到聊天软件里会显示成坏链。
  * @constraint 必须从实际数据推导而不是写死清单：注册表、音效分组、纹理分组
  *      都随版本变化，写死的那份迟早和 UI 对不上。
+ * @constraint 必须在**打包后的**目录上推导。源目录的 items.json 可能是旧版
+ *      fetch 留下的，分组被 normalizeItemGroups 修过之后两边就不一致了：
+ *      页面按新分组渲染，路由却按旧分组落盘，新分类点开是 404。
  */
-async function secondaryRoutes(version) {
-  const dir = path.join(ASSETS_ROOT, version)
+async function secondaryRoutes(dir) {
   const read = async (name) => {
     try {
       return JSON.parse(await readFile(path.join(dir, name), 'utf8'))
@@ -493,6 +496,13 @@ async function cmdPack() {
   await cp(derivedDir, mcDir, { recursive: true, force: true })
 
   /**
+   * @constraint 必须在 `secondaryRoutes` 之前跑。二级路由是从 items.json 的
+   *      groups 推导的，分组没修正时会按旧的 building_blocks 落一份 index.html，
+   *      而新分类全是 404——页面能开、链接贴出去是坏链。
+   */
+  await normalizeItemGroups(mcDir)
+
+  /**
    * 音效计数以实际分发的清单为准。
    *
    * @why CI 用 `--no-sounds` 提取素材，.ogg 不落盘，fetch-assets 是按磁盘文件
@@ -542,7 +552,7 @@ async function cmdPack() {
   //      但线上 `/ui` 在 devtools 里是一条红色的 404，任何存活检测/企业代理都会
   //      把它当成页面挂了。一级路由各落一份 index.html，深链接才是 200。
   //      二级路由（/data/items、/sounds/mob…）同理，从数据推导后一并落地。
-  const deepRoutes = [...ROUTES, ...(await secondaryRoutes(version))]
+  const deepRoutes = [...ROUTES, ...(await secondaryRoutes(mcDir))]
   for (const route of deepRoutes) {
     const dir = path.join(outDir, route)
     await mkdir(dir, { recursive: true })

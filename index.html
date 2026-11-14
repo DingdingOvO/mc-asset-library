@@ -5,6 +5,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="color-scheme" content="light dark" />
     <title>MC 素材库</title>
+    <!-- @why 内联声明而不是只放 public/：浏览器会先请求 /favicon.ico，
+         没有声明时每条页面日志里都是一条红色 404，看起来像资源缺失 -->
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta
       name="description"
       content="Minecraft Java 版纹理与音效浏览，按版本提取，可直接下载。"
