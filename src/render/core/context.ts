@@ -119,6 +119,15 @@ export class GlContext {
     if (target.height !== h) target.height = h
     const ctx = target.getContext('2d')
     if (!ctx) return
+    /**
+     * @constraint 拷贝前必须 flush。`drawArrays` 只是把命令排进 GPU 队列，
+     *      并不保证后备缓冲已经更新；紧接着的 `drawImage(glCanvas)` 读的是
+     *      后备缓冲，命令没执行完就读到上一次 `begin()` 清出来的透明像素。
+     *      单张预览时浏览器往往替我们隐式同步，看不出问题；列表里几十张缩略图
+     *      连续 render→blit 时，前面几张赶上了，后面全部拷成空白——现象是
+     *      "生物列表只有前几个渲染出来"，而管线统计里三角形数完全正常。
+     */
+    this.gl.flush()
     ctx.clearRect(0, 0, w, h)
     ctx.drawImage(this.canvas, 0, 0, this.width, this.height, 0, 0, w, h)
   }

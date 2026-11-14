@@ -653,7 +653,7 @@ function paintGpu(
   try {
     const pipeline = modelPipeline()
     if (!pipeline.ready(faces as ModelFace[], options.version)) return false
-    pipeline.render(
+    const stats = pipeline.render(
       layer.canvas,
       options.gpuKey ?? `f${faces.length}|${options.version}`,
       faces as ModelFace[],
@@ -672,7 +672,14 @@ function paintGpu(
       options.version,
       options.shading ?? 'block',
     )
-    return true
+    /**
+     * @constraint 不能只看"没抛异常"就宣告 GPU 画完了。实体顶点转译对一部分
+     *      生物产出 0 个三角形（骨骼层、平面部件、特殊渲染器还没接上），
+     *      这时管线是"成功画了一帧空气"：画布全透明，又不回落 CPU，
+     *      列表里那些生物就永久空白——而且控制台一句报错都没有。
+     *      按三角形数判定才能把这类静默失败交还给 CPU 光栅化。
+     */
+    return stats.triangles > 0
   } catch (error) {
     warnOnce(error)
     return false
