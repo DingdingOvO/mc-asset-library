@@ -4,7 +4,7 @@ import { SearchBox } from '@/components/SearchBox'
 import { ModelModal } from '@/components/ModelModal'
 import { ModelView, type Subject } from '@/components/ModelView'
 import { textureSrc } from '@/lib/mc'
-import { loadRegistries, type RegistryEntry } from '@/lib/registries'
+import { loadRegistrySection, type RegistryEntry } from '@/lib/registries'
 import { buildRig, type Rig } from '@/lib/entityRig'
 import { loadEntityModels, type EntityModel } from '@/lib/entityMesh'
 import { createPoser, loadAnims, type Poser } from '@/lib/anim'
@@ -62,7 +62,9 @@ const ALIAS: Record<string, { model: string; texture?: string }> = {
 }
 
 function EntityBrowser({ version }: { version: string }) {
-  const { data, loading, error } = useAsync(`registries:${version}`, () => loadRegistries(version))
+  const { data, loading, error } = useAsync(`registry-entities:${version}`, () =>
+    loadRegistrySection(version, 'entities'),
+  )
   const models = useAsync(`entitymodels:${version}`, () => loadEntityModels(version))
   const anims = useAsync(`entityanims:${version}`, () => loadAnims(version))
   const renderers = useAsync(`entityrenderers:${version}`, () => loadRenderers(version))
@@ -100,7 +102,7 @@ function EntityBrowser({ version }: { version: string }) {
     const map = new Map<string, Prepared>()
     const ids = new Set<string>([
       ...Object.keys(table ?? {}),
-      ...(data?.registries.find((registry) => registry.id === 'entities')?.entries ?? []).map(
+      ...(data?.entries ?? []).map(
         (entry) => entry.id,
       ),
     ])
@@ -221,7 +223,7 @@ function EntityBrowser({ version }: { version: string }) {
 
   const query = params.get('q') ?? ''
   const entries = useMemo(
-    () => data?.registries.find((registry) => registry.id === 'entities')?.entries ?? [],
+    () => data?.entries ?? [],
     [data],
   )
 

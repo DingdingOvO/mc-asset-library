@@ -4,13 +4,13 @@ import { fileURLToPath, URL } from 'node:url'
 import { defineConfig } from 'vite'
 import type { Plugin } from 'vite'
 import react from '@vitejs/plugin-react'
-import { viteSingleFile } from 'vite-plugin-singlefile'
 import { mcAssetsPlugin } from './vite.mc-assets.ts'
 
 /**
  * GitHub Pages 没有 rewrite 能力，深链接（/entities/xxx）会被当成文件找不到。
- * @why 复制一份 404.html 就能让 Pages 把任意未知路径交回 SPA；但产物是
- *      单文件 HTML，React Router 又会按 BASE_URL 剥掉前缀，所以直接复制即可。
+ * @why 复制一份 404.html 就能让 Pages 把任意未知路径交回 SPA。产物已改为
+ *      code splitting，404.html 里的资源用绝对 base 引用，所以在深路径下
+ *      被加载也不会去错地方（相对路径会解析成 /repo/sounds/assets/…）。
  */
 function pagesFallback(): Plugin {
   return {
@@ -35,14 +35,24 @@ const siteBase = (() => {
 })()
 
 export default defineConfig({
-  // @why 线上网关偶发丢请求，CSS/JS 分开加载时只要丢一个页面就裸奔；
-  // 内联成单文件后整站只有一个 HTML 请求，素材图片再按需加载
+  /**
+   * @constraint 必须是绝对前缀。产物不再是单文件，404.html 会落在
+   *      `/repo/sounds/mob` 这种深路径下被加载，相对路径 `./assets/x.js`
+   *      会被解析成 `/repo/sounds/assets/x.js`，整页白屏。
+   */
+  base: siteBase,
+  /**
+   * @why 这里曾经用 vite-plugin-singlefile 把所有 JS/CSS 内联进一个 HTML，
+   *      理由是「线上网关偶发丢请求」。代价是首屏必须下完整个 920KB 才能
+   *      出现任何东西：慢网络下实测 35 秒白屏，用户以为站点挂了。
+   *      拆回路由级 code splitting + 绝对 base 后首屏只剩几十 KB，
+   *      丢单个资源请求的概率远低于「用户等不到 35 秒就关掉」。
+   */
   plugins: [
     react(),
     // @why derived 在前：sounds.json 的中文字幕名只在 derived 里，
     //      mc-assets 那份是 fetch 重新生成的裸版本
     mcAssetsPlugin(['./mc-derived', './mc-assets']),
-    viteSingleFile(),
     pagesFallback(),
   ],
   resolve: {
@@ -72,7 +82,30 @@ export default defineConfig({
   build: {
     target: 'es2022',
     sourcemap: false,
-    cssCodeSplit: false,
-    assetsInlineLimit: 100000000,
+    /**
+     * @constraint cssCodeSplit 必须开。关掉时整站 CSS 会合并成一个大文件，
+     *      首页也要等它下完才能画第一帧。
+     */
+    cssCodeSplit: true,
+    /**
+     * @constraint 不能再用巨大的 assetsInlineLimit。之前设成 1e8 会把所有
+     *      图片、字体都 base64 进 HTML，单文件体积就是这么涨到 920KB 的。
+     */
+    assetsInlineLimit: 4096,
+    rollupOptions: {
+      output: {
+        /**
+         * @constraint 用函数形式，不要用对象形式。对象形式要求每个 chunk 的
+         *      依赖都显式列出，漏了 react-is / scheduler 就会在运行时报
+         *      "Cannot access before initialization"（跨 chunk 循环引用）。
+         */
+        manualChunks(id: string) {
+          if (!id.includes('node_modules')) return undefined
+          if (/node_modules\/(react|react-dom|scheduler)\//.test(id)) return 'react'
+          if (id.includes('node_modules/react-router')) return 'react'
+          return undefined
+        },
+      },
+    },
   },
 })

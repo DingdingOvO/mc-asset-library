@@ -1058,10 +1058,30 @@ async function buildRegistries(outDir, version) {
     })
   }
 
+  /**
+   * 注册表按段拆开落盘。
+   *
+   * @constraint 不能把所有段的 entries 塞进一个 registries.json。那份合并文件
+   *      677KB，而方块页只需要 blocks 段的 134KB、物品页只需要 items 段的 191KB，
+   *      另外 350KB 是给 /data/models 用的文件清单，跟列表页毫无关系。慢网络下
+   *      这多出来的 350KB 就是十几秒白屏。
+   * @why 根文件保留摘要（label/count/route），/data 首页和数据页只读它。
+   */
   await writeFile(
     path.join(outDir, 'registries.json'),
-    JSON.stringify({ version, registries }),
+    JSON.stringify({
+      version,
+      registries: registries.map(({ entries: _entries, ...rest }) => rest),
+    }),
   )
+  const sectionsDir = path.join(outDir, 'registries')
+  await mkdir(sectionsDir, { recursive: true })
+  for (const registry of registries) {
+    await writeFile(
+      path.join(sectionsDir, `${registry.id}.json`),
+      JSON.stringify({ version, id: registry.id, entries: registry.entries }),
+    )
+  }
 
   return registries.map((registry) => ({ id: registry.id, count: registry.count }))
 }

@@ -4,7 +4,7 @@ import { ModelModal } from '@/components/ModelModal'
 import { ModelView, type Subject } from '@/components/ModelView'
 import { SearchBox } from '@/components/SearchBox'
 import { loadBakeShard, loadBlockModels, type BakedFace } from '@/lib/blockmodels'
-import { loadRegistries } from '@/lib/registries'
+import { loadRegistrySection } from '@/lib/registries'
 import { useAsync } from '@/lib/useAsync'
 import { useLibrary } from '@/lib/useLibrary'
 import { useVirtualGrid } from '@/lib/useVirtualGrid'
@@ -29,7 +29,7 @@ export default function Blocks() {
 
 function BlockBrowser({ version }: { version: string }) {
   const models = useAsync(`blockmodels:${version}`, () => loadBlockModels(version))
-  const registries = useAsync(`registries:${version}`, () => loadRegistries(version))
+  const registries = useAsync(`registry-blocks:${version}`, () => loadRegistrySection(version, 'blocks'))
   const [params, setParams] = useSearchParams()
   const [selected, setSelected] = useState<string | null>(null)
   // @why 半截方块（门/床/高花）单独渲染必然残缺，默认收起，需要时再放开
@@ -74,9 +74,10 @@ function BlockBrowser({ version }: { version: string }) {
 
   const names = useMemo(() => {
     const map = new Map<string, { n: string; e: string | null }>()
-    for (const registry of registries.data?.registries ?? []) {
-      if (registry.id !== 'blocks') continue
-      for (const entry of registry.entries) map.set(entry.id, { n: entry.n, e: entry.e })
+    // @constraint 只取 blocks 段。合并版 registries.json 有 677KB，其中 350KB 是
+    //      给 /data/models 用的文件清单，方块页一个字段都用不上。
+    for (const entry of registries.data?.entries ?? []) {
+      map.set(entry.id, { n: entry.n, e: entry.e })
     }
     return map
   }, [registries.data])

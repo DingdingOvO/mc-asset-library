@@ -31,7 +31,8 @@ export interface Registry {
   /** assets 下的目录（模型、着色器），条目 id 是带扩展名的相对路径 */
   assetDir?: string
   count: number
-  entries: RegistryEntry[]
+  /** @why 摘要文件不带条目，条目在 registries/<id>.json 里按需取 */
+  entries?: RegistryEntry[]
 }
 
 export interface RegistryFile {
@@ -39,7 +40,15 @@ export interface RegistryFile {
   registries: Registry[]
 }
 
+/** 单个注册表的完整条目。`entries` 一定存在，与摘要版区分开 */
+export interface RegistrySection {
+  version: string
+  id: string
+  entries: RegistryEntry[]
+}
+
 const cache = new Map<string, Promise<RegistryFile>>()
+const sectionCache = new Map<string, Promise<RegistrySection>>()
 
 export function loadRegistries(version: string): Promise<RegistryFile> {
   const hit = cache.get(version)
@@ -52,6 +61,27 @@ export function loadRegistries(version: string): Promise<RegistryFile> {
   })()
 
   cache.set(version, task)
+  return task
+}
+
+/**
+ * 取单个注册表的条目。
+ *
+ * @why 合并版 registries.json 有 677KB，列表页往往只用一个段（方块 134KB、
+ *      物品 191KB、生物 11KB）。按段取能省掉一半以上的等待。
+ */
+export function loadRegistrySection(version: string, id: string): Promise<RegistrySection> {
+  const key = `${version}/${id}`
+  const hit = sectionCache.get(key)
+  if (hit) return hit
+
+  const task = (async () => {
+    const response = await fetchWithRetry(`${BASE}/${version}/registries/${id}.json`)
+    if (!response.ok) throw new Error(`注册表 ${id} 加载失败：${response.status}`)
+    return (await response.json()) as RegistrySection
+  })()
+
+  sectionCache.set(key, task)
   return task
 }
 

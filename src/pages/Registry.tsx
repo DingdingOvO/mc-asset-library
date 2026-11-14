@@ -8,6 +8,7 @@ import {
   loadAssetText,
   loadRegistries,
   loadRegistryEntryJson,
+  loadRegistrySection,
   type RegistryEntry,
 } from '@/lib/registries'
 import { useAsync } from '@/lib/useAsync'
@@ -26,14 +27,18 @@ export default function Registry() {
 }
 
 function RegistryBrowser({ version, registryId }: { version: string; registryId: string }) {
+  // 摘要（拿 label/kind/source）+ 该段条目（拿 entries）分两次取，避免拉 677KB 合并文件
   const { data, loading, error } = useAsync(`registries:${version}`, () => loadRegistries(version))
+  const section = useAsync(`registry:${version}:${registryId}`, () =>
+    loadRegistrySection(version, registryId),
+  )
   const [params, setParams] = useSearchParams()
   const [selected, setSelected] = useState<RegistryEntry | null>(null)
   const [json, setJson] = useState<string | null>(null)
 
   const registry = data?.registries.find((entry) => entry.id === registryId)
   const query = params.get('q') ?? ''
-  const entries = useMemo(() => registry?.entries ?? [], [registry])
+  const entries = useMemo(() => section.data?.entries ?? [], [section.data])
 
   const filtered = useMemo(() => {
     const keyword = query.trim().toLowerCase()
@@ -76,8 +81,11 @@ function RegistryBrowser({ version, registryId }: { version: string; registryId:
     )
   }
 
-  if (error) return <p className="notice notice--error container">读取失败：{error.message}</p>
-  if (loading) return <p className="empty">正在加载…</p>
+  if (error || section.error) {
+    const reason = error ?? section.error
+    return <p className="notice notice--error container">读取失败：{reason?.message}</p>
+  }
+  if (loading || section.loading) return <p className="empty">正在加载…</p>
   if (!registry) {
     return (
       <div className="container">

@@ -151,7 +151,7 @@ function contentBounds(volume: BlockVolume): { min: [number, number, number]; ma
   return { min: [minX, minY, minZ], max: [maxX + 1, maxY + 1, maxZ + 1] }
 }
 
-export function Structures() {
+export default function Structures() {
   const { version, loading, error } = useLibrary()
   const index = useAsync(`structures:${version ?? ''}`, () =>
     version ? loadStructureIndex(version) : Promise.reject(new Error('版本未就绪')),

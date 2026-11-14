@@ -30,8 +30,11 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
-      # @why 素材 460MB 里 456MB 是音效和多余语言，Pages 站点上限 1GB 且每次部署
-      #      都要整体上传。裁到「无音效 + 中英双语」后约 7MB，构建时间也从分钟级降到秒级。
+      # @constraint 音效必须全量发布。这里原先是 `--no-sounds`，理由是
+      #      「460MB 里 456MB 是音效，Pages 上限 1GB」。但裁掉之后站上 4961 条音效
+      #      全部 404，试听形同虚设——列表越完整，坏得越明显。
+      #      实测全量产物 467MB，仍在 1GB 以内；代价是首次部署要解 369MB .ogg，
+      #      之后命中 mc-assets 缓存。
       - name: 缓存素材
         uses: actions/cache@v4
         with:
@@ -39,7 +42,7 @@ jobs:
           key: mc-assets-${{ hashFiles('mc-assets.lock.json') }}
 
       - name: 准备素材
-        run: node scripts/fetch-assets.mjs 26.3 --no-sounds --lang=zh_cn,en_us
+        run: node scripts/fetch-assets.mjs 26.3 --lang=zh_cn,en_us
 
       - name: 构建
         run: pnpm build

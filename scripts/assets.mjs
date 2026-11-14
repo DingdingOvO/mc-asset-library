@@ -35,6 +35,39 @@ const LOCK_FILE = path.join(ROOT, 'mc-assets.lock.json')
  */
 const ROUTES = ['blocks', 'items', 'entities', 'particles', 'ui', 'data', 'browse', 'sounds', 'structures']
 
+/**
+ * 由数据推导出的二级路由。
+ *
+ * @why GitHub Pages 对没有实体文件的路径一律回 404.html，状态码也跟着 404。
+ *      一级路由靠 ROUTES 各落一份 index.html 拿到了 200，但 `/data/items`、
+ *      `/sounds/mob`、`/browse/block` 这些带参数的路径没有对应文件，线上看起来
+ *      就是「页面在但状态码 404」——贴到聊天软件里会显示成坏链。
+ * @constraint 必须从实际数据推导而不是写死清单：注册表、音效分组、纹理分组
+ *      都随版本变化，写死的那份迟早和 UI 对不上。
+ */
+async function secondaryRoutes(version) {
+  const dir = path.join(ASSETS_ROOT, version)
+  const read = async (name) => {
+    try {
+      return JSON.parse(await readFile(path.join(dir, name), 'utf8'))
+    } catch {
+      return null
+    }
+  }
+  const out = new Set()
+  const registries = await read('registries.json')
+  for (const registry of registries?.registries ?? []) {
+    if (registry.id) out.add(`data/${registry.id}`)
+  }
+  const sounds = await read('sounds.json')
+  for (const item of sounds?.items ?? []) if (item.g) out.add(`sounds/${item.g}`)
+  const textures = await read('textures.json')
+  for (const group of textures?.groups ?? []) if (group.id) out.add(`browse/${group.id}`)
+  const items = await read('items.json')
+  for (const group of items?.groups ?? []) if (group.id) out.add(`items/${group.id}`)
+  return [...out]
+}
+
 /** 派生数据：从反编译源码提取，无法由官方 jar 重建，必须入库 */
 const DERIVED_FILES = [
   'entitymodels.json',
@@ -508,7 +541,9 @@ async function cmdPack() {
   // @why Pages 对任何未知路径都回 404.html，状态码也就跟着是 404。SPA 照样渲染，
   //      但线上 `/ui` 在 devtools 里是一条红色的 404，任何存活检测/企业代理都会
   //      把它当成页面挂了。一级路由各落一份 index.html，深链接才是 200。
-  for (const route of ROUTES) {
+  //      二级路由（/data/items、/sounds/mob…）同理，从数据推导后一并落地。
+  const deepRoutes = [...ROUTES, ...(await secondaryRoutes(version))]
+  for (const route of deepRoutes) {
     const dir = path.join(outDir, route)
     await mkdir(dir, { recursive: true })
     await copyFile(path.join(outDir, 'index.html'), path.join(dir, 'index.html'))
