@@ -14,6 +14,7 @@
 import { BLOCK_LAYOUT, ENTITY_LAYOUT, MeshBuffer } from './core/buffer'
 import { glContext, hasWebGl, type GlContext } from './core/context'
 import { identity, multiply, ortho } from './core/matrix'
+import { fitFraction, rotationMatrix4 } from './camera/projection'
 import { Program, build } from './core/program'
 import { Renderer, type DrawCall, type FrameContext } from './core/renderer'
 import { Texture, TextureCache } from './core/texture'
@@ -344,7 +345,7 @@ export class ModelPipeline {
     const model = multiply(
       translateMatrix(translate[0]! / units, translate[1]! / units, translate[2]! / units),
       multiply(
-        rotationMatrix(camera.rotX, camera.rotY),
+        rotationMatrix4(camera.rotX, camera.rotY),
         multiply(
           scaleMatrix(scale[0]! / units, scale[1]! / units, scale[2]! / units),
           translateMatrix(-camera.pivot[0], -camera.pivot[1], -camera.pivot[2]),
@@ -356,8 +357,8 @@ export class ModelPipeline {
     const cy = camera.center?.[1] ?? 0
     const span = camera.span ?? 1
 
-    // 取景：与 `pixelScale` 一致（block 78% / auto 84%），span 是相机空间跨度
-    const fraction = camera.fit === 'auto' ? 0.84 : 0.78
+    // 取景：与 CPU 侧 `pixelScale` 共用同一个占比常量
+    const fraction = fitFraction(camera.fit)
     const viewSize = span / (camera.size * fraction * zoom) // 一个像素对应多少世界单位
     const half = (camera.size * viewSize) / 2
 
@@ -448,42 +449,6 @@ function scaleMatrix(x: number, y: number, z: number): Float32Array {
   m[0] = x
   m[5] = y
   m[10] = z
-  return m
-}
-
-/**
- * 模型旋转矩阵。
- *
- * @constraint 必须与 `scene.ts` 的 `rotationXYZ(rx, ry, 0)` 逐项一致：
- *      先绕 X 转 rotX，再绕 Y 转 rotY（`mul3(axisRot('x'), axisRot('y'))`
- *      表示先应用 Y 后应用 X，即 `Rx · Ry`）。这里转成列主序 4×4。
- */
-function rotationMatrix(rotX: number, rotY: number): Float32Array {
-  const rad = Math.PI / 180
-  const cx = Math.cos(rotX * rad)
-  const sx = Math.sin(rotX * rad)
-  const cy = Math.cos(rotY * rad)
-  const sy = Math.sin(rotY * rad)
-
-  /**
-   * @constraint 这是 `Rx · Ry` 的展开（行主序）。`scene.ts` 的
-   *      `rotationXYZ` 是 `mul3(axisRot('x'), axisRot('y'))`，即先应用 Y 后 X。
-   *      写成 `Ry · Rx` 或把某一项的符号搞反，画面会变成"从下往上看"——
-   *      俯视 30° 变成仰视 30°，模型露出腹部。这个错误极难从静态截图发现，
-   *      因为模型本身仍然完整，只是角度不对。
-   */
-  const r = [
-    [cy, 0, sy],
-    [sx * sy, cx, -sx * cy],
-    [-cx * sy, sx, cx * cy],
-  ]
-
-  const m = identity()
-  for (let row = 0; row < 3; row += 1) {
-    for (let col = 0; col < 3; col += 1) {
-      m[col * 4 + row] = r[row]![col]!
-    }
-  }
   return m
 }
 

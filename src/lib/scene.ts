@@ -13,6 +13,7 @@ import { rasterize } from './raster'
 import { textureSrc } from './mc'
 import { peekTexel } from './texel'
 import { hasWebGl, modelPipeline, type ModelFace } from '@/render'
+import { apply3, pixelScale, rotationXYZ } from '@/render/camera/projection'
 
 export type Vec3 = [number, number, number]
 
@@ -111,8 +112,6 @@ export function emptyCameraBox(): CameraBox {
   return { minX: Infinity, maxX: -Infinity, minY: Infinity, maxY: -Infinity }
 }
 
-const RAD = Math.PI / 180
-
 /** 全站统一的等轴测视角：俯视 30°、水平转 225° */
 export const DEFAULT_ROTATION: [number, number, number] = [30, 225, 0]
 /**
@@ -137,38 +136,6 @@ const LIGHT: Vec3 = [0.42, 0.78, -0.46]
  *      整体提亮过一档，避免深色方块糊成黑块。
  */
 const FACE_LUMA = { up: 1, ns: 0.88, ew: 0.76, down: 0.66 }
-
-function mul3(a: number[], b: number[]): number[] {
-  const out = new Array<number>(9)
-  for (let r = 0; r < 3; r += 1) {
-    for (let c = 0; c < 3; c += 1) {
-      out[r * 3 + c] = a[r * 3]! * b[c]! + a[r * 3 + 1]! * b[3 + c]! + a[r * 3 + 2]! * b[6 + c]!
-    }
-  }
-  return out
-}
-
-function axisRot(axis: 'x' | 'y' | 'z', deg: number): number[] {
-  const r = deg * RAD
-  const c = Math.cos(r)
-  const s = Math.sin(r)
-  if (axis === 'x') return [1, 0, 0, 0, c, -s, 0, s, c]
-  if (axis === 'y') return [c, 0, s, 0, 1, 0, -s, 0, c]
-  return [c, -s, 0, s, c, 0, 0, 0, 1]
-}
-
-/** joml 的 rotationXYZ 等价于 Rx * Ry * Rz */
-export function rotationXYZ(rx: number, ry: number, rz: number): number[] {
-  return mul3(mul3(axisRot('x', rx), axisRot('y', ry)), axisRot('z', rz))
-}
-
-export function apply3(m: number[], v: Vec3): Vec3 {
-  return [
-    m[0]! * v[0] + m[1]! * v[1] + m[2]! * v[2],
-    m[3]! * v[0] + m[4]! * v[1] + m[5]! * v[2],
-    m[6]! * v[0] + m[7]! * v[1] + m[8]! * v[2],
-  ]
-}
 
 /**
  * 一组面的包围盒中心（模型单位，y 向上）。
@@ -273,10 +240,8 @@ export function frameAroundPivot(box: CameraBox): FrameBounds | null {
   }
 }
 
-/** 每格模型在屏幕上占多少物理像素 */
-export function pixelScale(size: number, fit: 'block' | 'auto', span: number, zoom = 1): number {
-  return (fit === 'auto' ? (size * 0.84) / span : size * 0.78) * zoom
-}
+/** 每格模型在屏幕上占多少物理像素（定义在渲染内核，这里转发以保持既有引用） */
+export { pixelScale }
 
 const FALLBACK: TexelSource = {
   data: new Uint8ClampedArray([122, 122, 128, 255]),

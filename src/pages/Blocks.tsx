@@ -1,19 +1,18 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { Link, useSearchParams } from 'react-router-dom'
 import { ModelModal } from '@/components/ModelModal'
 import { ModelView, type Subject } from '@/components/ModelView'
 import { SearchBox } from '@/components/SearchBox'
-import { loadBakeShard, loadBlockModels, type BakedFace } from '@/lib/blockmodels'
+import { loadBlockModels } from '@/lib/blockmodels'
 import { loadRegistrySection } from '@/lib/registries'
 import { useAsync } from '@/lib/useAsync'
+import { useShardFaces } from '@/lib/useShardFaces'
 import { useLibrary } from '@/lib/useLibrary'
 import { useVirtualGrid } from '@/lib/useVirtualGrid'
 import { tipAttrs } from '@/lib/tip'
 
 interface BlockEntry {
   id: string
-  /** 面数据所在的分片下标 */
-  shard: number
   n: string
   e: string | null
 }
@@ -35,43 +34,6 @@ function BlockBrowser({ version }: { version: string }) {
   // @why 半截方块（门/床/高花）单独渲染必然残缺，默认收起，需要时再放开
   const [showHidden, setShowHidden] = useState(false)
 
-  /**
-   * 已取回的面数据。
-   * @why 放 ref 而不是 state：滚动时一帧可能同时回来三片、每片两百个条目，
-   *      逐片 setState 会触发三次整页重渲染。统一在全部落地后 +1 一次。
-   */
-  const facesRef = useRef<Record<string, BakedFace[]>>({})
-  const doneShards = useRef(new Set<number>())
-  const loadingShards = useRef(new Set<number>())
-  const [revision, setRevision] = useState(0)
-
-  /**
-   * 组件是否还挂载。
-   * @why 不能用 effect 的清理标志判断：分片回来前，注册表/语言数据到达会触发
-   *      重渲染，取数据的 effect 随之被清理重建。用清理标志就会把已经到手的
-   *      数据当垃圾丢掉，而 doneShards 没标记、revision 没自增，依赖也不再变化
-   *      —— 卡片永远停在占位（Pages 上分片要 1.3 秒，必现）。
-   *      数据落地与是否挂载无关，只有 setState 需要在意。
-   */
-  const mounted = useRef(true)
-  useEffect(() => {
-    // @constraint 必须在 setup 里置回 true。StrictMode 下 effect 会走
-    //      setup → cleanup → setup 一轮，只在 cleanup 里置 false 的话，
-    //      开发环境整页永远停在占位（数据取回来了也不敢 setState）。
-    mounted.current = true
-    return () => {
-      mounted.current = false
-    }
-  }, [])
-
-  // 换版本等于换一整套数据，旧分片的 key 全部失效
-  useEffect(() => {
-    facesRef.current = {}
-    doneShards.current = new Set()
-    loadingShards.current = new Set()
-    setRevision((value) => value + 1)
-  }, [version])
-
   const names = useMemo(() => {
     const map = new Map<string, { n: string; e: string | null }>()
     // @constraint 只取 blocks 段。合并版 registries.json 有 677KB，其中 350KB 是
@@ -92,33 +54,28 @@ function BlockBrowser({ version }: { version: string }) {
   const all = useMemo<BlockEntry[]>(() => {
     const meta = models.data
     if (!meta) return []
-    const size = meta.shardSize > 0 ? meta.shardSize : 200
     const out: BlockEntry[] = []
-    meta.blockIds.forEach((id, index) => {
-      if (!showHidden && hiddenSet.has(id)) return
+    for (const id of meta.blockIds) {
+      if (!showHidden && hiddenSet.has(id)) continue
       const label = names.get(id)
-      out.push({ id, shard: Math.floor(index / size), n: label?.n ?? id, e: label?.e ?? null })
-    })
+      out.push({ id, n: label?.n ?? id, e: label?.e ?? null })
+    }
     return out
   }, [models.data, names, showHidden, hiddenSet])
 
-  const subjects = useMemo(() => {
+  /**
+   * 方块 id → 分片下标。
+   * @why 注册表顺序与面数据的字母序切片不同，只能靠这张表对照；
+   *      同时它也是 `useShardFaces` 的唯一输入。
+   */
+  const shardOf = useMemo(() => {
     const meta = models.data
-    const map = new Map<string, Subject>()
+    const map = new Map<string, number>()
     if (!meta) return map
-    for (const [id, faces] of Object.entries(facesRef.current)) {
-      map.set(id, {
-        kind: 'block',
-        faces,
-        textures: meta.textures,
-        anims: meta.anims,
-        display: meta.displays[id],
-        flat: false,
-      })
-    }
+    const size = meta.shardSize > 0 ? meta.shardSize : 200
+    meta.blockIds.forEach((id, index) => map.set(id, Math.floor(index / size)))
     return map
-    // revision 变化代表有新的一片面数据落地
-  }, [models.data, revision])
+  }, [models.data])
 
   const query = params.get('q') ?? ''
 
@@ -140,57 +97,26 @@ function BlockBrowser({ version }: { version: string }) {
   })
   const total = filtered.length
 
-  /**
-   * 滚动到哪一片就取哪一片。
-   * @why 面数据 1136KB，首屏只看得到十几张卡片。整包下发等于让用户先等一兆多 JSON。
-   * @constraint 依赖必须是 visible 而不是 wanted：拖动滚动条会瞬间跳过几十行，
-   *      按可见项算才能只请求"真正要画的"那几片。
-   */
-  useEffect(() => {
+  // 分片按可见项与当前详情项取回，见 useShardFaces
+  const faceParts = useShardFaces(version, 'blocks', shardOf, visible, selected)
+
+  const subjects = useMemo(() => {
     const meta = models.data
-    if (!meta) return
-    const want: number[] = []
-    for (const entry of visible) {
-      if (doneShards.current.has(entry.shard) || loadingShards.current.has(entry.shard)) continue
-      loadingShards.current.add(entry.shard)
-      want.push(entry.shard)
+    const map = new Map<string, Subject>()
+    if (!meta) return map
+    for (const [id, faces] of Object.entries(faceParts.faces)) {
+      map.set(id, {
+        kind: 'block',
+        faces,
+        textures: meta.textures,
+        anims: meta.anims,
+        display: meta.displays[id],
+        flat: false,
+      })
     }
-    if (want.length === 0) return
-
-    void Promise.all(
-      want.map(async (shard) => {
-        try {
-          const part = await loadBakeShard(version, 'blocks', shard)
-          Object.assign(facesRef.current, part)
-          doneShards.current.add(shard)
-        } catch {
-          // 失败的片允许下次滚动时重试，不要标记成已完成
-        } finally {
-          loadingShards.current.delete(shard)
-        }
-      }),
-    ).then(() => {
-      if (mounted.current) setRevision((value) => value + 1)
-    })
-  }, [visible, models.data, version])
-
-  /**
-   * 点开了还没取回面数据的方块（可见性判定与点击之间有几帧的窗口）。
-   * @why 没有这一步，用户在分片还在路上时点开头一张卡片，弹窗会显示"没有可用的立体模型"。
-   */
-  useEffect(() => {
-    const meta = models.data
-    if (!selected || !meta) return
-    if (facesRef.current[selected]) return
-    const index = meta.blockIds.indexOf(selected)
-    if (index < 0) return
-    const shard = Math.floor(index / (meta.shardSize > 0 ? meta.shardSize : 200))
-    void loadBakeShard(version, 'blocks', shard).then((part) => {
-      Object.assign(facesRef.current, part)
-      doneShards.current.add(shard)
-      setRevision((value) => value + 1)
-    })
-  }, [selected, models.data, version])
+    return map
+    // revision 变化代表有新的一片面数据落地
+  }, [models.data, faceParts.revision])
 
   const updateQuery = (value: string) => {
     setParams(
