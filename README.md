@@ -44,6 +44,9 @@ pnpm run setup:lite   # 下载约 130MB，落盘 145MB；完整版再多半 GB �
 |---|---|---|
 | `src/lib/raster.ts` | 软件光栅器：三角形填充、z-buffer、半透明 over 合成 | ✅ |
 | `src/lib/scene.ts` | 正交投影、光照、描边、画布合成 | ✅ |
+| `src/render/camera/projection.ts` | **相机与取景数学的唯一真相**：旋转、取景占比。CPU 光栅化与 GPU 管线都从这里取，不允许各写一份 | ✅ |
+| `src/lib/useShardFaces.ts` | 面数据按分片按需加载（方块页 / 物品页共用） | ✅ |
+| `scripts/items-group.mjs` | 用创造栏数据回填物品分类与顺序，打包时按需重算 | ✅ |
 | `src/lib/blockmodels.ts` | 方块模型 JSON → 面片，含 `elements`/`rotation`/`uvlock` | ✅ |
 | `src/lib/entityRig.ts` | `ModelPart` 树 → 面片，逐盒 UV 展开 | ✅ |
 | `src/lib/anim.ts` | `setupAnim` 的 JS 侧复刻：行走、坐、幼年、头部朝向 | ✅ |

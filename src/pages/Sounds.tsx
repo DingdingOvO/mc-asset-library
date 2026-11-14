@@ -184,8 +184,8 @@ function SoundBrowser({ version }: { version: string }) {
       {error && <p className="notice notice--error">索引加载失败：{error.message}</p>}
       {audioMissing && (
         <p className="notice">
-          当前部署版没有随包发布音频文件（原版 369MB 的 .ogg 超出静态站体积预算），清单、音效名与事件 ID
-          照常可查，试听不可用。本地构建带上音效后即可播放。
+          这个音效没能播放出来。音频文件是随包发布的，常见原因是浏览器不支持 Ogg
+          Vorbis（Safari 旧版），或刚才那次请求被网络中断了——重试一次通常就好。
         </p>
       )}
       {loading && <p className="empty">正在加载音效…</p>}

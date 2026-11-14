@@ -24,10 +24,11 @@ function pagesFallback(): Plugin {
 }
 
 /**
- * @constraint 不能用 Vite 的 `base` / `import.meta.env.BASE_URL`：vite-plugin-singlefile
- *      在 config 钩子里把 base 强制改成 './'（为了产物能直接 file:// 打开），
- *      BASE_URL 永远是 './'，路由 basename 会变成 "."，整站渲染不出东西。
- *      这里自己算一份绝对前缀注入成常量，与插件解耦。
+ * 站点前缀。
+ *
+ * @constraint 必须自己算一份绝对前缀，不能只依赖 `import.meta.env.BASE_URL`
+ *      给路由当 basename：Pages 部署在 `/repo/` 下，任何以 `./` 开头的相对
+ *      解析都会在深路径（`/repo/sounds/mob`）里指错目录。
  */
 const siteBase = (() => {
   const raw = process.env.VITE_BASE ?? '/'
