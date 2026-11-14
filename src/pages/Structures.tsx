@@ -27,8 +27,17 @@ const GROUND_LAYERS: { state: string; height: number }[] = [
   { state: 'minecraft:stone', height: 1 },
 ]
 
-/** 结构四周留的空地（格） */
-const PADDING = 3
+/**
+ * 结构四周留的空地（格）。
+ *
+ * @constraint 不能取固定值。取 3 时，7×7 的小营地体积被撑到 13×13，
+ *      而取景是按实心包围盒算的（草地平台也是实心），于是帐篷只占
+ *      画面一半，四周全是空草地。取景要跟着结构尺寸走才合理：
+ *      小结构留 1 格够看出"地面"，大结构留 3 格才不会让边缘贴住画布。
+ */
+function paddingFor(width: number, depth: number): number {
+  return Math.min(3, Math.max(1, Math.round(Math.max(width, depth) * 0.04)))
+}
 /** 地面顶面往上留的净空（格），够放高塔 */
 const HEADROOM = 12
 /** 地面总厚度（格） */
@@ -43,7 +52,8 @@ const GROUND_DEPTH = GROUND_LAYERS.reduce((sum, layer) => sum + layer.height, 0)
  */
 function composeVolume(template: StructureTemplate): BlockVolume {
   const [tw, th, td] = template.size
-  const size: [number, number, number] = [tw + PADDING * 2, th + HEADROOM + GROUND_DEPTH, td + PADDING * 2]
+  const padding = paddingFor(tw, td)
+  const size: [number, number, number] = [tw + padding * 2, th + HEADROOM + GROUND_DEPTH, td + padding * 2]
   const ground = createVolume(size)
 
   /**
@@ -77,15 +87,15 @@ function composeVolume(template: StructureTemplate): BlockVolume {
           // @constraint 结构内部标成空气的格子要显式清掉，否则地形会从下面
           //      灌进地下室和门洞里，房子像被土埋了半截
           if (targetY >= baseY) {
-            const existing = getBlock(ground, x + PADDING, targetY, z + PADDING)
+            const existing = getBlock(ground, x + padding, targetY, z + padding)
             if (existing.name !== 'minecraft:air') {
-              setBlock(ground, x + PADDING, targetY, z + PADDING, 'minecraft:air')
+              setBlock(ground, x + padding, targetY, z + padding, 'minecraft:air')
             }
           }
           continue
         }
         const state = voxel.palette[source]
-        if (state) setBlock(ground, x + PADDING, targetY, z + PADDING, state)
+        if (state) setBlock(ground, x + padding, targetY, z + padding, state)
       }
     }
   }
@@ -152,10 +162,8 @@ export function Structures() {
   const files = index.data?.files ?? []
   const filtered = useMemo(() => {
     const needle = query.trim().toLowerCase()
-    const pool = needle
-      ? files.filter((file) => file.path.toLowerCase().includes(needle) || file.name.includes(needle))
-      : files
-    return pool.slice(0, 200)
+    if (!needle) return files
+    return files.filter((file) => file.path.toLowerCase().includes(needle) || file.name.includes(needle))
   }, [files, query])
 
   useEffect(() => {
