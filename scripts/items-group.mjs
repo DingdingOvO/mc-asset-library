@@ -11,9 +11,11 @@
  * @constraint 必须幂等。每次部署都从 creativetabs.json 重算，不依赖
  *      `items.json` 上一轮是什么状态——否则修好一次、下次又被 stale 数据覆盖。
  *
- * @constraint 排序只能在**同一条目集合内**重排，不能丢条目。创造栏表是早于
- *      当前版本反编译出来的，会有几十个新物品不在任何一页里；把它们塞进
- *      「未分类」而不是丢弃，页面至少能看到全量。
+ * @constraint 排序只能在**同一条目集合内**重排，不能丢条目。注册表里有几十
+ *      个条目根本不在创造栏：`air`、只靠命令拿到的隐藏方块、以及同一个物品
+ *      的不同数据组件形态（药水、附魔书、带宝藏地图的 `filled_map`）。
+ *      它们集中放最后一组并如实标成「创造栏外」，而不是含糊的「未分类」——
+ *      后者让人以为分类没做完。
  */
 import { readFile, writeFile } from 'node:fs/promises'
 import path from 'node:path'
@@ -104,7 +106,7 @@ export async function normalizeItemGroups(mcDir) {
   if (counts.misc) {
     groups.push({
       id: 'misc',
-      label: '未分类',
+      label: '创造栏外',
       count: counts.misc,
       cover: GROUP_COVERS.misc,
     })

@@ -68,6 +68,17 @@ function ItemBrowser({ version, group }: { version: string; group: string }) {
   })
   const total = filtered.length
 
+  /**
+   * chip 上的计数按**当前列表**重算，不用 `groups[].count`。
+   * @why 数据里的计数含 `air`（注册表里有、列表里被隐藏），
+   *      直接显示会出现「创造栏外 33」点进去只有 32 项。
+   */
+  const groupCounts = useMemo(() => {
+    const counts = new Map<string, number>()
+    for (const item of list) counts.set(item.g, (counts.get(item.g) ?? 0) + 1)
+    return counts
+  }, [list])
+
   // 分片按可见项与当前详情项取回，见 useShardFaces
   const faceParts = useShardFaces(version, 'items', shardOf, visible, selected?.id ?? null)
 
@@ -127,7 +138,9 @@ function ItemBrowser({ version, group }: { version: string; group: string }) {
             ← 返回首页
           </Link>
           <h1>{activeLabel}</h1>
-          <p>{total} 项 · 按创造模式物品栏的原生顺序排列</p>
+          <p>
+            {total} 项 · {group === 'misc' ? '注册表里有、创造模式物品栏没有的条目' : '按创造模式物品栏的原生顺序排列'}
+          </p>
         </div>
 
         <div className="browse-bar">
@@ -144,7 +157,7 @@ function ItemBrowser({ version, group }: { version: string; group: string }) {
                 aria-pressed={group === entry.id}
               >
                 {entry.label}
-                <span className="chip__count">{entry.count}</span>
+                <span className="chip__count">{groupCounts.get(entry.id) ?? entry.count}</span>
               </Link>
             ))}
           </div>
