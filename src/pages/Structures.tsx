@@ -12,6 +12,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { hasWebGl, modelPipeline } from '@/render'
 import { buildVoxelBatches, type VoxelBatch } from '@/render/world/mesher'
+import { paintVoxelsCpu } from '@/render/world/cpuPaint'
 import { createVolume, getBlock, setBlock } from '@/lib/world/terrain'
 import { rasterize, type StructureTemplate } from '@/lib/world/structure'
 import { loadStructure, loadStructureIndex } from '@/lib/world/structureStore'
@@ -231,6 +232,8 @@ interface Prepared {
   span: number
   /** 转台枢轴（体积坐标），取内容包围盒中心 */
   pivot: [number, number, number]
+  /** 没有 WebGL2 时走 2D 画家算法，见 `render/world/cpuPaint` */
+  cpu: boolean
 }
 
 function StructurePreview({ path, version }: PreviewProps) {
@@ -278,17 +281,19 @@ function StructurePreview({ path, version }: PreviewProps) {
       setPrepared(null)
       return
     }
-    if (!hasWebGl()) {
-      setStatus('这个浏览器不支持 WebGL2，结构预览需要它')
-      return
-    }
     let alive = true
     setStatus('装配方块…')
     setPrepared(null)
     void (async () => {
       const { geometry, models } = await loadGeometry(version, ids)
       const batches = buildVoxelBatches(scene, geometry)
-      await modelPipeline().prepareTextures(texturesOf(ids, models), version)
+      const cpu = !hasWebGl()
+      /**
+       * @constraint 贴图只给 GPU 路径预热。CPU 兜底自己按批取纹素，
+       *      走 `prepareTextures` 会尝试建 GL 纹理，在没有上下文的
+       *      环境里直接抛异常，把整页拖下水。
+       */
+      if (!cpu) await modelPipeline().prepareTextures(texturesOf(ids, models), version)
       if (!alive) return
       const { min, max } = contentBounds(scene)
       const dx = max[0] - min[0]
@@ -305,6 +310,7 @@ function StructurePreview({ path, version }: PreviewProps) {
         batches,
         span: Math.max(Math.hypot(dx, dz), dy) * 1.05,
         pivot: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2],
+        cpu,
       })
       const triangles = batches.reduce((n, batch) => n + batch.vertexCount / 3, 0)
       setStatus(`${batches.length} 张贴图 · ${Math.round(triangles).toLocaleString()} 个三角形`)
@@ -320,6 +326,40 @@ function StructurePreview({ path, version }: PreviewProps) {
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas || !prepared) return
+
+    if (prepared.cpu) {
+      /**
+       * @constraint CPU 路径一次要排几千个三角形（几十到两百毫秒），
+       *      拖拽时每帧都跑会把主线程占满、手感变成幻灯片。这里压到
+       *      一次拖拽动作结束前不再重入：定时器被下一次 effect 清掉，
+       *      只有停手 40ms 之后才真正重画。
+       */
+      let cancelled = false
+      const timer = window.setTimeout(() => {
+        if (cancelled) return
+        void paintVoxelsCpu(
+          canvas,
+          prepared.batches,
+          {
+            size,
+            rotX: pose.rotX,
+            rotY: pose.rotY,
+            zoom: pose.zoom,
+            span: prepared.span,
+            pivot: prepared.pivot,
+            fraction: 0.84,
+          },
+          version,
+        ).then((result) => {
+          if (!cancelled) setStatus(`${result.triangles.toLocaleString()} 个三角形 · CPU 预览`)
+        })
+      }, 40)
+      return () => {
+        cancelled = true
+        window.clearTimeout(timer)
+      }
+    }
+
     modelPipeline().renderWorld(
       canvas,
       /**
