@@ -187,7 +187,7 @@ function ItemBrowser({ version, group }: { version: string; group: string }) {
               >
                 {subject ? (
                   <ModelView subject={subject} version={version} size={64} />
-                ) : (
+                ) : item.i ? (
                   // @why 箱子、床这类 special 渲染没有可解析模型，退回图标
                   <img
                     className="tex-cell__img"
@@ -199,6 +199,10 @@ function ItemBrowser({ version, group }: { version: string; group: string }) {
                       event.currentTarget.style.visibility = 'hidden'
                     }}
                   />
+                ) : (
+                  // @why 打包阶段把找不到贴图的条目清成了空串（空气之类），
+                  //      这里不再请求，避免每张卡片刷一条 404
+                  <span className="tex-cell__img tex-cell__img--empty" />
                 )}
                 <span className="block-cell__name">{item.n}</span>
               </button>

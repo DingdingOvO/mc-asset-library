@@ -47,6 +47,7 @@ pnpm run setup:lite   # 下载约 130MB，落盘 145MB；完整版再多半 GB �
 | `src/render/camera/projection.ts` | **相机与取景数学的唯一真相**：旋转、取景占比。CPU 光栅化与 GPU 管线都从这里取，不允许各写一份 | ✅ |
 | `src/lib/useShardFaces.ts` | 面数据按分片按需加载（方块页 / 物品页共用） | ✅ |
 | `scripts/items-group.mjs` | 用创造栏数据回填物品分类与顺序，打包时按需重算 | ✅ |
+| `scripts/extract-tabs.py` | 读 client.jar 字节码还原创造栏分类与顺序（含颜色集合、铜系列变体展开） | ✅ |
 | `src/lib/blockmodels.ts` | 方块模型 JSON → 面片，含 `elements`/`rotation`/`uvlock` | ✅ |
 | `src/lib/entityRig.ts` | `ModelPart` 树 → 面片，逐盒 UV 展开 | ✅ |
 | `src/lib/anim.ts` | `setupAnim` 的 JS 侧复刻：行走、坐、幼年、头部朝向 | ✅ |
@@ -117,7 +118,9 @@ python3 scripts/extract-entities.py /tmp/modelsrc/net/minecraft/client/model
 python3 scripts/extract-anim.py     /tmp/modelsrc/net/minecraft/client/model
 python3 scripts/extract-renderers.py
 python3 scripts/extract-layers.py
-python3 scripts/extract-tabs.py /tmp/tabs.java
+# 创造栏这一支不用反编译产物：它直接读 jar 里的字节码（javap），
+# 因为注册顺序只在 getstatic 的出现顺序里，源码排版会骗人
+python3 scripts/extract-tabs.py /tmp/client-26.3.jar
 python3 scripts/extract-particles.py
 python3 scripts/extract-sound-names.py
 

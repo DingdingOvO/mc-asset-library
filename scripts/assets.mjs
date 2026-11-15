@@ -22,7 +22,7 @@ import { createHash } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import { copyFile, cp, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import path from 'node:path'
-import { normalizeItemGroups } from './items-group.mjs'
+import { normalizeItemGroups, normalizeIcons } from './items-group.mjs'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
 const ASSETS_ROOT = path.join(ROOT, 'mc-assets')
@@ -501,6 +501,7 @@ async function cmdPack() {
    *      而新分类全是 404——页面能开、链接贴出去是坏链。
    */
   await normalizeItemGroups(mcDir)
+  await normalizeIcons(mcDir)
 
   /**
    * 音效计数以实际分发的清单为准。

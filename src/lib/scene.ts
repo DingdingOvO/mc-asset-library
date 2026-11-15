@@ -347,7 +347,13 @@ export function projectFaces(faces: Face3D[], options: ProjectOptions): ProjectR
 
     // @constraint 纹理没就绪时用 1 像素占位而不是跳过：跳过会让整个面消失，
     //              用户看到的是"模型缺了一块"
-    const source = peekTexel(textureSrc(version, face.tex)) ?? FALLBACK
+    /**
+     * @constraint 贴图名必须含 `/`。模型里 `textures: { all: "#all" }` 这类
+     *      自引用会被解析成一个裸名字 `all`，直接拼成 URL 就是
+     *      `textures/all.png`——每个含该模型的页面都会多一条 404。
+     *      裸名字当无效值处理，退回占位色而不是发请求。
+     */
+    const source = (face.tex.includes('/') ? peekTexel(textureSrc(version, face.tex)) : null) ?? FALLBACK
 
     const verts = [] as unknown as RasterFace['verts']
     const bias = face.bias ?? 0

@@ -253,7 +253,10 @@ export function ModelView({
   const textureKey =
     subject.kind === 'entity'
       ? [subject.texture, ...(subject.layers ?? []).map((layer) => layer.texture)].join('|')
-      : [...new Set((staticFaces ?? []).map((face) => face.tex))].join('|')
+      // @constraint 贴图名必须含 `/`：模型里 `textures: { all: "#all" }` 这种
+      //      自引用会被解析成裸名字 `all`，拼出来就是 textures/all.png，
+      //      每个用到该模型的页面都会多一条 404。裸名字不进预载清单。
+      : [...new Set((staticFaces ?? []).map((face) => face.tex).filter((tex) => tex.includes('/')))].join('|')
 
   /**
    * 预载纹理，让 GPU 管线能接管。

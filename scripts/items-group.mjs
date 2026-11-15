@@ -18,6 +18,7 @@
  *      后者让人以为分类没做完。
  */
 import { readFile, writeFile } from 'node:fs/promises'
+import { existsSync } from 'node:fs'
 import path from 'node:path'
 
 /**
@@ -46,6 +47,72 @@ async function readJson(file) {
   } catch {
     return null
   }
+}
+
+/**
+ * 少数物品的图标不是「一张静态图」。
+ *
+ * @why 罗盘、时钟是 32 帧动画，`item/compass.png` 根本不存在，只有
+ *      `compass_00.png` 起的一串；盾牌走特殊渲染，图标用的是
+ *      `entity/shield/base`。不修的话这几种物品在列表里是**空白卡片**——
+ *      图片 404 后 onError 把 img 隐藏，卡片只剩名字。
+ *      优先取动画首帧，其次特例表，都不中就把 `i` 清空，
+ *      让页面干脆不请求，而不是每个页面刷一条 404。
+ */
+const ICON_FALLBACKS = {
+  shield: 'entity/shield/base',
+}
+
+/**
+ * 原地修正所有带图标的表的路径。`.png` 是否真的存在由分发目录决定。
+ *
+ * @why 同一份数据被物品页、方块页、注册表页共用，修一处不修另一处会出现
+ *      「物品页好了、数据页还在刷 404」。`items.json` 与
+ *      `registries/*.json` 的条目结构一致（都有 id/n/i），走同一条修复。
+ *
+ * @return 修掉的条数
+ */
+export async function normalizeIcons(mcDir) {
+  const texRoot = path.join(mcDir, 'textures')
+  if (!existsSync(texRoot)) return 0
+
+  const has = (name) => name && existsSync(path.join(texRoot, `${name}.png`))
+  const fix = (entry) => {
+    if (entry.i === undefined || has(entry.i)) return false
+    const candidates = [`${entry.i}_00`, `item/${entry.id}`, `block/${entry.id}`, ICON_FALLBACKS[entry.id]]
+    entry.i = candidates.find(has) ?? ''
+    return true
+  }
+
+  let fixed = 0
+  const itemFile = path.join(mcDir, 'items.json')
+  const items = await readJson(itemFile)
+  if (items?.items) {
+    let touched = 0
+    for (const entry of items.items) if (fix(entry)) touched += 1
+    if (touched > 0) {
+      await writeFile(itemFile, JSON.stringify(items))
+      fixed += touched
+    }
+  }
+
+  const regDir = path.join(mcDir, 'registries')
+  if (existsSync(regDir)) {
+    const { readdir } = await import('node:fs/promises')
+    for (const name of await readdir(regDir)) {
+      if (!name.endsWith('.json')) continue
+      const file = path.join(regDir, name)
+      const table = await readJson(file)
+      if (!table?.entries) continue
+      let touched = 0
+      for (const entry of table.entries) if (fix(entry)) touched += 1
+      if (touched > 0) {
+        await writeFile(file, JSON.stringify(table))
+        fixed += touched
+      }
+    }
+  }
+  return fixed
 }
 
 /**
