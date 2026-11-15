@@ -6,7 +6,7 @@
 
 三件事和常见的「贴图预览站」不一样：
 
-- **立体模型是软件光栅化算出来的**。没有 three.js，没有 WebGL 上下文，只有 `raster.ts` 里一个带 z-buffer 的三角形光栅器 + 超采样。所以每张方块图标、每个生物渲染都能逐像素控制，也能离线导出。
+- **渲染有两条路，按能力自动切**。有 WebGL2 时走 `render/` 里的 GPU 管线（着色器逐行照搬原版 core shader，顶点格式对齐 `DefaultVertexFormat.BLOCK`）；没有时退回 `raster.ts` 的软件光栅器，逐像素填充 + z-buffer + 超采样。所以"关了硬件加速的浏览器"也能看，而且每条路径都能逐像素控制、能离线导出。
 - **生物模型不是猜的**。几何、UV、动画、渲染图层全部由 `scripts/extract-*.py` 从反编译的 Java 源码里提取，字段与 `ModelPart$Cube`、`setupAnim`、`addLayer` 一一对应。263 个烘焙模型全部有贴图，`for` 循环里建的部件（烈焰人的十二根棒子、末影龙的脖子）、静态数组常量（蠹虫的分段尺寸）、返回数值的静态方法（守护者的十二根尖刺）都按源码求值，不靠猜。
 - **动作量也是**。步态不由"每秒转多少弧度"这类估算驱动，而是照 `LivingEntity.updateWalkAnimation` 实现：速度由位移 ×4 平滑而来、上限 1，位置是速度的逐 tick 累加，所以腿的相位与步幅天然一致（玩家稳定态是 0.864 而不是 1）。史莱姆的伸缩走 `AbstractCubeMob.tick` 的落地/离地双状态、鱿鱼触手走 `|sin(movement)|·π/4`，都是原样搬过来的。
 - **状态能选**。品种、花纹、染色、职业都是下拉框：猫 11 种毛色、狼 27 张、马 7 色 × 5 花纹、村民 7 生态型 × 15 职业（僵尸村民同样）。
@@ -57,6 +57,29 @@ pnpm run setup:lite   # 下载约 130MB，落盘 145MB；完整版再多半 GB �
 | `scripts/assets.mjs` | 素材管线的统一入口（sync/ensure/verify/lock/stats） | ✅ |
 | `scripts/extract-containers.py` | 从反编译源码提取容器槽位/尺寸/切片 → `containers.json` | ✅ |
 | `src/lib/workspace.ts` | 工作区模型：容器节点、槽位物品、序列化 | ✅ |
+
+## 渲染与数据口径对照
+
+这一栏是"到底照没照原版"的答案——每一行都能在代码里找到对应实现，能自己核对：
+
+| 站点实现 | 原版来源 |
+|---|---|
+| `render/shader/terrain.ts` | `assets/minecraft/shaders/core/terrain.vsh\|fsh`，含 `sampler2D Sampler2` 光照图、`sampleRGSS`、`ChunkVisibility` 淡入；只去掉 `MULTIDRAW_TERRAIN`/`OIT_*`/`FADE_IN` 三个用不到的分支 |
+| `render/lighting/directions.ts` | `Lighting.Entry` 的四组方向（`level`/`nether`/`inventory`/`items_flat`/`items_3d`）与 `CardinalLighting.DEFAULT`（1.0 / 0.8 / 0.6 / **0.5**） |
+| `render/camera/projection.ts` | JOML `Matrix4f.rotationXYZ` 语义（`Rx·Ry·Rz`），CPU 与 GPU 共用一份 |
+| `render/core/buffer.ts` `BLOCK_LAYOUT` | `DefaultVertexFormat.BLOCK` 的字段顺序与归一化方式 |
+| `render/world/mesher.ts` | 邻接剔除规则：只有「邻居是不透明满格」才丢面，玻璃/树叶之间保留 |
+| `lib/world/nbt.ts` · `structure.ts` | `NbtIo` 的位宽与 gzip 约定；`StructureTemplate` 的 palette 下标、`Rotation` 四档、`Mirror` |
+| `lib/entityRig.ts` · `entityMesh.ts` | `ModelPart$Cube` 的逐盒 UV 展开，跨度 0 的面丢弃 |
+| `lib/anim.ts` | `setupAnim` 与 `LivingEntity.updateWalkAnimation` 的逐步复刻 |
+| `lib/mcui/*` | `TooltipRenderUtil`、`NineSlice`、`GuiGraphics.blitSprite`、`AbstractContainerScreen` 的槽位坐标 |
+| `lib/font.ts` | `UnihexProvider.Glyph` 的 `unpackBitsToBytes`、字形 `advance` 规则 |
+| `scripts/extract-tabs.py` | 直接读 `client.jar` 里 `CreativeModeTabs` 的字节码，配合 `BlockItemIds` / `ItemIds` 的 `create("...")` 还原真实 id |
+
+两处**故意不做**，理由写在这里以免被当成漏做：
+
+- **环境光遮蔽（AO）**。原版 `BlockModelLighter` 的顶点亮度是 `(该点光照 × 权重 + 三个邻居的光照) × 0.25`，它依赖世界里真实的光照传播。站点没有世界光照（统一按满亮），硬造一个遮蔽系数就只是"加了脏阴影"，不再对应任何原版算法，所以宁可不出这个效果。
+- **Sodium 那套区块网格与顶点压缩**。它解决的是"视距 32 区块、每帧重建脏区块"，而这里最复杂的场景是一次性渲染 1.5 万个方块的静态结构，用不上，也就没有照抄。
 
 ## 为什么仓库里没有素材
 
