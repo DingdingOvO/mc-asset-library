@@ -483,6 +483,33 @@ class JavaRandom:
 
 # ---------------------------------------------------------------- 几何结构
 
+def retain_parts(ctx, root, names, exact):
+    """
+    执行 PartDefinition.retainPartsAndChildren / retainExactParts。
+
+    @why 同一个 MeshDefinition 会被多个图层复用，各自用 retain 把无关部件"清空"
+          （不是删除：pose 层级要留着，否则子树整体错位）。旋风人就是典型：
+          body 层声明 32×32 的 UV 网格，却同源生成了 wind_body 那一整枝 128×128
+          的盒子——不执行 retain，头身层里会混进几个 UV 到 (125,70) 的盒子，
+          按 32×32 归一化后整片采样到贴图外，看起来就是"有几个面画不出来"。
+    """
+    for child in ctx.parts[root]['children']:
+        node = ctx.parts[child]
+        if node['name'] in names:
+            if exact:
+                clear_subtree(ctx, child)
+            continue
+        node['cubes'] = []
+        retain_parts(ctx, child, names, exact)
+
+
+def clear_subtree(ctx, idx):
+    """retainExactParts 里命中名字时，连同整棵子树一起清空"""
+    ctx.parts[idx]['cubes'] = []
+    for child in ctx.parts[idx]['children']:
+        clear_subtree(ctx, child)
+
+
 class Ctx:
     """一次 PartDefinition 树的构建过程"""
 
@@ -601,7 +628,15 @@ def parse_cubes(expr, env):
             has_id = bool(args) and args[0].startswith('"')
             vals = [a for a in args if not a.startswith('"')]
             if has_id:
-                uv = uv if len(vals) < 9 else (num(vals[7], env), num(vals[8], env))
+                # 带 id 的重载把 UV 写在参数末尾，而且有两种长度：
+                #   addBox(id, x,y,z,w,h,d, texX, texY)             → 8 个值
+                #   addBox(id, x,y,z,w,h,d, CubeDeformation, texX, texY) → 9 个值
+                # @constraint 末影龙整只是第一种写法，之前只认 9 个值的那种，
+                #      65 个盒子的 UV 全部落在 (0,0)，龙被画成一坨单色黑块。
+                if len(vals) >= 9 and ('CubeDeformation' in vals[6] or vals[6].strip() in ('true', 'false')):
+                    uv = (num(vals[7], env), num(vals[8], env))
+                elif len(vals) == 8:
+                    uv = (num(vals[6], env), num(vals[7], env))
             if len(vals) < 6:
                 i = nxt
                 continue
@@ -984,6 +1019,20 @@ def exec_stmt(stmt, ctx, depth, cls):
         ctx.parts[root]['name'] = ''
         ctx.mesh_roots[m.group(1)] = root
         env[m.group(1)] = root
+        return None
+
+    # mesh.getRoot().retainPartsAndChildren(Set.of("head", "rods"))
+    m = re.match(r'(?:\w+)\.(?:getRoot\(\)\.)?(retainPartsAndChildren|retainExactParts)\s*\(', stmt)
+    if m:
+        inner, _ = read_balanced(stmt, m.end())
+        names = set(re.findall(r'"([^"]+)"', inner))
+        root = None
+        rm = re.match(r'(\w+)', stmt)
+        if rm:
+            # mesh 变量可能只登记在 mesh_roots 里（MeshDefinition mesh = Xxx.createBaseMesh()）
+            root = env.get(rm.group(1), ctx.mesh_roots.get(rm.group(1)))
+        if isinstance(root, int) and names:
+            retain_parts(ctx, root, names, m.group(1) == 'retainExactParts')
         return None
 
     # CubeDeformation g = new CubeDeformation(0.5f) / CubeDeformation.NONE
@@ -1546,11 +1595,13 @@ def match_texture(key, want=None):
             if size[0] < want[0] or size[1] < want[1]:
                 # 贴图比模型声明的还小，说明配错了对象
                 continue
-            if size[0] % want[0] == 0 and size[1] % want[1] == 0:
-                sx, sy = size[0] // want[0], size[1] // want[1]
-                if sx == sy:
-                    return path, sx, size
-            # 非等比（贴图右侧/下方留白）：UV 仍按模型声明尺寸归一化
+            # @constraint 贴图分辨率不参与 UV 计算。原版 UV 是 LayerDefinition
+            #       声明的网格坐标（如 64×32），归一化时除的就是这个网格尺寸；
+            #       RenderType.entityCutout 再把它映射到图集里该贴图的整块区域，
+            #       所以 128×64 的"高清"贴图与 64×32 的 UV 网格天然兼容。
+            #       之前为了高清贴图把 UV 起点乘 2、把 texW 换成贴图宽度，结果
+            #       起点乘了 2、跨度还是模型单位，只剩左半边贴图可用——恶魂的
+            #       east/south 两面直接采样到贴图外面，看着就是"面不见了"。
             return path, 1, None
         return path, 1, size
     return None, 1, None

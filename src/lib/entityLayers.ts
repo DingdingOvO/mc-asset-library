@@ -26,6 +26,12 @@ export interface LayerDef {
   t: string
   /** 发光层：满亮渲染 */
   e?: 0 | 1
+  /**
+   * 1 = 半透明图层（RenderTypes.entityTranslucent 一族）。
+   * @why 这类贴图整片带 40~120 的 alpha，按 cutout 抠像会把淡的部分丢掉，
+   *      旋风人的风涡就只剩几条硬白边。必须走混合。
+   */
+  a?: 0 | 1
   /** 吃染料色 */
   d?: 1
   /** wool = 羊毛类（默认白色），tame = 只有驯服后才出现（项圈） */
@@ -104,7 +110,7 @@ export function loadLayers(version: string): Promise<LayerFile> {
   const hit = cache.get(version)
   if (hit) return hit
   const task = (async () => {
-    const response = await fetchWithRetry(`${MC_BASE}/${version}/entitylayers.json?v=3`)
+    const response = await fetchWithRetry(`${MC_BASE}/${version}/entitylayers.json?v=4`)
     if (!response.ok) throw new Error(`图层数据加载失败：${response.status}`)
     return (await response.json()) as LayerFile
   })()
@@ -215,6 +221,7 @@ export function composeLayers(
       cls: def.c,
       tint: def.d ? (tint ?? (def.k === 'wool' ? [1, 1, 1] : undefined)) : undefined,
       unlit: def.e === 1,
+      translucent: def.a === 1,
     })
   }
   return out

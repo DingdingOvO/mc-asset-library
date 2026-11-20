@@ -355,6 +355,7 @@ export function rigFaces(
         tint: style?.tint,
         bias: style?.bias,
         unlit: style?.unlit,
+        translucent: style?.translucent,
       })
     }
   }
@@ -369,6 +370,8 @@ export interface LayerStyle {
   unlit?: boolean
   /** 相机空间深度偏置（格）。叠加层要和本体区分开，否则共面打架 */
   bias?: number
+  /** 半透明：贴图带成片 alpha，交给混合，不能抠像 */
+  translucent?: boolean
 }
 
 /** 一层贴图 + 几何。rig 为 null 表示复用本体几何（眼睛层就是这样） */
@@ -379,6 +382,8 @@ export interface EntityLayer {
   cls: string
   tint?: [number, number, number]
   unlit?: boolean
+  /** 半透明图层：走混合而不是抠像，见 LayerDef.a */
+  translucent?: boolean
 }
 
 /** 叠加层的深度偏置：一格的千分之四，足够压过共面又不会穿过薄片 */
@@ -408,6 +413,7 @@ export function entityFaces(
     const extra = rigFaces(layer.rig ?? rig, poses, layer.texture, {
       tint: layer.tint,
       unlit: layer.unlit,
+      translucent: layer.translucent,
       bias: LAYER_BIAS * step,
     })
     step += 1

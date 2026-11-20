@@ -73,7 +73,7 @@ ZH = {
 
 # 贴图名里出现这些词说明它是"装备/状态"贴图，不是品种皮肤
 SKIP_TOKENS = {'armor', 'collar', 'crackiness', 'saddle', 'harness', 'body', 'spit',
-               'eyes', 'charging', 'wind', 'undercoat', 'pattern', 'markings', 'decor'}
+               'eyes', 'charging', 'undercoat', 'pattern', 'markings', 'decor'}
 
 # 装备型图层：贴图来自 equipment 资源，不属于生物外观
 SKIP_LAYERS = {
@@ -85,9 +85,12 @@ SKIP_LAYERS = {
     'RopesLayer', 'SpinAttackEffectLayer', 'CapeLayer', 'Deadmau5EarsLayer',
     'CustomHeadLayer', 'DolphinCarryingItemLayer', 'BeeStingerLayer',
     'EnergySwirlLayer', 'StuckInBodyLayer', 'IronGolemCrackinessLayer',
-    # 只在特定状态下才该出现的图层（充能苦力怕、凋灵护甲、旋风）：
+    # 只在特定状态下才该出现的图层（充能苦力怕、凋灵护甲）：
     # 预览里没有这些状态，默认画上去反而变成错的皮
-    'CreeperPowerLayer', 'WitherArmorLayer', 'BreezeWindLayer',
+    'CreeperPowerLayer', 'WitherArmorLayer',
+    # @constraint 旋风层不在跳过之列：它不是"充能"式的可选状态，
+    #      而是旋风人本体的一部分（BreezeRenderer 构造器里无条件 addLayer）。
+    #      少这一层，旋风人就只剩一个头加三根棍子。
 }
 
 
@@ -293,6 +296,10 @@ def describe_layer(cls, inner, layers_table):
                 or 'state.woolColor' in source) else 0
     eyes = 1 if (cls.endswith('EyesLayer') or 'RenderTypes.eyes' in source
                  or 'entityTranslucentEmissive' in source) else 0
+    # @constraint 半透明图层必须走混合，不能按 cutout 抠像：旋风人的风涡
+    #      贴图整片 alpha 在 40~120，cutout 会把淡的部分直接丢掉、只留下
+    #      几条硬白边，看着像模型外面套了个塑料壳。
+    translucent = 1 if re.search(r'RenderTypes\.(entityTranslucent|breezeWind|entityTranslucentCull|entityTranslucentEmissiveNoOutline)', source) else 0
     # 需要"已驯服/项圈颜色"才出现的图层：没选颜色就不画，和游戏里一致
     tame = 1 if 'collarColor' in source else 0
     sheared = 1 if 'isSheared' in source else 0
@@ -305,6 +312,8 @@ def describe_layer(cls, inner, layers_table):
     if not adult:
         return None
     entry = {'c': cls, 'm': model, 't': adult, 'e': eyes}
+    if translucent:
+        entry['a'] = 1
     if dye:
         entry['d'] = 1
     if tame:

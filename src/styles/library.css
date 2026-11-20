@@ -1615,8 +1615,16 @@
     gap: 8px;
   }
 
-  .browse-bar > .search {
+  .browse-bar > .search,
+  /* @why 结构页的输入框是裸 input（没有 .search 外壳），少了这条在 390px 下
+     会被「1511 项」挤到只剩半行，占位符截成「搜索结构，比如 village / shi」。 */
+  .browse-bar > .browse-bar__input {
     flex: 1 1 100%;
+    min-width: 0;
+  }
+
+  .browse-bar > .browse-bar__count {
+    margin-left: auto;
   }
 
   .page-head h1 {

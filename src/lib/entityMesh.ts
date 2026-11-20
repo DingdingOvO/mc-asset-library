@@ -71,7 +71,7 @@ export function loadEntityModels(version: string): Promise<EntityModelFile> {
     // @why 带格式版本：几何改为按 LayerDefinitions 的真实 bake 路径提取
     //      （含 scale / visibleFaces / 正确的 material 尺寸）。缓存了旧 JSON 的话
     //      UV 归一化尺寸是错的，整只生物会碎成几块。
-    const response = await fetch(`${MC_BASE}/${version}/entitymodels.json?v=9`)
+    const response = await fetch(`${MC_BASE}/${version}/entitymodels.json?v=10`)
     if (!response.ok) throw new Error(`实体模型加载失败：${response.status}`)
     return (await response.json()) as EntityModelFile
   })()

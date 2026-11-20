@@ -72,6 +72,10 @@ pnpm run setup:lite   # 下载约 130MB，落盘 145MB；完整版再多半 GB �
 | `scripts/fetch-assets.mjs` `textureAlpha` | `RenderType` 的三档（solid / cutout / translucent）。位深 1/2/4/8/16、调色板 + `tRNS`、灰度 + 颜色键、真彩 + `tRNS` 全部按 PNG 规范解，贴在模型上的 `force_translucent` 优先于像素统计 |
 | `lib/world/nbt.ts` · `structure.ts` | `NbtIo` 的位宽与 gzip 约定；`StructureTemplate` 的 palette 下标、`Rotation` 四档、`Mirror`；`jigsaw`/`structure_block`/`barrier`/`light`/`cave_air` 按"玩家看不见"跳过 |
 | `lib/entityRig.ts` · `entityMesh.ts` | `ModelPart$Cube` 的逐盒 UV 展开，跨度 0 的面丢弃；父子关系按**下标**而不是名字（悦灵、青蛙、嘎枝都是 `root` 套 `root`，按名字查父会解析成自环） |
+| `scripts/extract-entities.py` `match_texture` | `LayerDefinition.create(mesh, texW, texH)` 里的**网格尺寸**才是 UV 归一化的除数，贴图分辨率不参与（恶魂的 `ghast.png` 是 128×64、网格是 64×32，按贴图宽归一化会把右半边推到采样范围外） |
+| `scripts/extract-entities.py` `retain_parts` | `PartDefinition.retainPartsAndChildren`：同一个 `MeshDefinition` 被多个图层复用时，各层要用 retain 把无关部件的 cube 清空（旋风人的头身层是 32×32 网格，里面还带着 128×128 的风涡盒子） |
+| `scripts/extract-entities.py` `parse_cubes` | `addBox(id, x, y, z, w, h, d, texX, texY)` 与 `addBox(id, …, CubeDeformation, texX, texY)` 两种带 id 的重载，UV 在参数**末尾**（末影龙 65 个盒子全是这个写法） |
+| `scripts/extract-layers.py` | `addLayer(new XxxLayer(...))` 的整条链，含 `RenderTypes.entityTranslucent` / `breezeWind` 这类需要混合的图层（按 cutout 抠像会把风涡抠成几条硬白边） |
 | `lib/anim.ts` | `setupAnim` 与 `LivingEntity.updateWalkAnimation` 的逐步复刻 |
 | `lib/mcui/*` | `TooltipRenderUtil`、`NineSlice`、`GuiGraphics.blitSprite`、`AbstractContainerScreen` 的槽位坐标 |
 | `lib/font.ts` | `UnihexProvider.Glyph` 的 `unpackBitsToBytes`、字形 `advance` 规则 |
