@@ -171,16 +171,13 @@ export function nodesFromRig(
   texture: string,
   poses?: Map<string, PartPose> | null,
 ): GltfNode[] {
-  const byName = new Map<string, RigPart>()
-  for (const part of rig.parts) byName.set(part.name, part)
-
   /** 与 rigFaces 的可见性判定保持一致：父部件藏了，子部件也一起藏 */
-  const visible = (part: RigPart, depth: number, seen: Set<string>): boolean => {
-    if (depth > 16 || seen.has(part.name)) return true
-    seen.add(part.name)
+  const visible = (part: RigPart, depth: number, seen: Set<number>): boolean => {
+    if (depth > 16 || seen.has(part.index)) return true
+    seen.add(part.index)
     const pose = poses?.get(part.name)
     if (pose && !pose.visible) return false
-    const parent = part.parent ? byName.get(part.parent) : null
+    const parent = part.parentIndex >= 0 ? rig.parts[part.parentIndex] : null
     return parent ? visible(parent, depth + 1, seen) : true
   }
 
@@ -188,7 +185,8 @@ export function nodesFromRig(
     const pose = poses?.get(part.name)
     return {
       name: part.name,
-      parent: part.parent ? (rig.parts.findIndex((item) => item.name === part.parent) ?? null) : null,
+      // @constraint 用下标而不是按名字找：父子同名的模型（悦灵、青蛙）按名字会指错节点
+      parent: part.parentIndex >= 0 ? part.parentIndex : null,
       translation: [
         (pose?.x ?? part.pivot[0]) * UNIT,
         -(pose?.y ?? part.pivot[1]) * UNIT,

@@ -164,13 +164,52 @@ export function inside(size: [number, number, number], pos: [number, number, num
 }
 
 /**
+ * 只在世界生成或编辑时存在、玩家在游戏里看不到的方块。
+ *
+ * @why 拼图方块（jigsaw）是结构生成器的连接器：一座试炼密室、一个远古城市
+ *      的内部能埋几十个，全部有贴图、有模型，铺到预览里就是一堆突兀的方块柱子，
+ *      而游戏里它们被生成过程吃掉了，玩家永远看不到。barrier / light /
+ *      structure_void / structure_block 同理，都是不可见的工具方块。
+ * @constraint 只跳过「确实不可见」的。像 chest 这种"模型在渲染器里"的方块
+ *      不能跳，那是有形的家具，缺了会让房间空一块。
+ */
+export const INVISIBLE_BLOCKS = new Set([
+  'minecraft:jigsaw',
+  'jigsaw',
+  'minecraft:structure_block',
+  'structure_block',
+  'minecraft:structure_void',
+  'structure_void',
+  'minecraft:barrier',
+  'barrier',
+  'minecraft:light',
+  'light',
+  'minecraft:moving_piston',
+  'moving_piston',
+  /*
+   * 空气的变体。@why 必须当成空气丢掉而不是当成一个"没有模型的方块"：
+   *      它们在结构文件里是独立条目，写进体积会把地形那一格覆盖成"未知方块"，
+   *      该格既不渲染也不挖洞——远古城市的地下洞穴因此被一层看不见的泥土
+   *      蒙住，看起来像地形没铺对。
+   */
+  'minecraft:cave_air',
+  'cave_air',
+  'minecraft:void_air',
+  'void_air',
+])
+
+/**
  * 把一个结构摊成 局部坐标 → 调色板下标 的稠密体素。
  *
  * @why 稠密而不是 Map：结构最多几万个方块，稠密表是 Uint16Array 直接下标，
  *      后面做遮挡剔除、面合并都要逐格遍历，Map 的字符串键在这件事上慢一个
  *      数量级。体积上限按 512³ 卡住，再大的结构在原版里也要切块。
  */
-export function rasterize(template: StructureTemplate): {
+export function rasterize(
+  template: StructureTemplate,
+  /** 返回 true 的方块按空气处理（用于滤掉世界生成专用的不可见方块） */
+  skip?: (name: string) => boolean,
+): {
   size: [number, number, number]
   palette: BlockState[]
   data: Uint16Array
@@ -181,6 +220,10 @@ export function rasterize(template: StructureTemplate): {
   const data = new Uint16Array(volume)
   for (const block of template.blocks) {
     if (!inside(size, block.pos)) continue
+    if (skip) {
+      const state = template.palette[block.state]
+      if (state && skip(state.name)) continue
+    }
     data[indexIn(size, block.pos[0], block.pos[1], block.pos[2])] = block.state + 1
   }
   const palette: BlockState[] = [{ name: 'minecraft:air' }, ...template.palette]

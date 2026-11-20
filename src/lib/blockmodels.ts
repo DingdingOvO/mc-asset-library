@@ -19,11 +19,21 @@ export interface BlockModelFile {
   /** 与 textures 一一对应的动画帧数（没动画的是 1） */
   frames: number[]
   /**
-   * 动画贴图的完整参数，键是纹理池里的下标。
-   * [帧数, frametime, 回放序列]
-   * @why frames 只说得出"有几帧"，说不出节奏：水的 frametime 是 2、火是 1，
-   *      岩浆还带一条 40 步的来回序列。少了这项，水流快一倍、岩浆朝一个方向死循环。
+   * 与 textures 平行的透明度类别：0 不透明、1 镂空、2 半透明。
+   *
+   * @why 这个判定以前在浏览器里扫纹素，结果取决于贴图有没有下载完：没下载完
+   *      一律当不透明，玻璃于是被当成实心块（邻接面被剔掉，透过玻璃看到空气），
+   *      树叶和蜘蛛网的透明像素被画成纯白。打包时算一次，运行时只查表。
+   * @constraint 缺这个字段的旧数据要按「未知」处理并退回运行时扫描，
+   *      不能让 indexOf 返回 -1 把整页判成半透明。
    */
+  alpha?: number[]
+  /**
+   * 满格全不透明方块的 id 清单，用于体素邻接剔除。
+   * @why 同上：运行时按贴图像素猜"这个方块实不实心"会随时序抖动。
+   */
+  opaque?: string[]
+  /** 动画贴图的完整参数，键是纹理池里的下标。 */
   anims?: Record<string, [number, number, number[] | null]>
   /**
    * 方块 / 物品的 id 清单，已按字符串排序。
@@ -52,8 +62,9 @@ const shardCache = new Map<string, Promise<Record<string, BakedFace[]>>>()
  * @constraint 动了字段语义必须递增：浏览器或网关缓存了旧 JSON 时，会把没有 anims
  *             的数据当成"全是静态贴图"，动画方块会集体冻在第一帧而且不报错。
  *             v3：面数据改成分片下发，meta 里的 blocks/items 恒为空。
+ *             v4：补 alpha / opaque 两张表，透明度判定从运行时搬到打包阶段。
  */
-const DATA_VERSION = 3
+const DATA_VERSION = 4
 
 /**
  * 单个面的字段数。

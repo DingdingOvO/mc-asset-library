@@ -93,6 +93,7 @@ function ItemBrowser({ version, group }: { version: string; group: string }) {
         kind: 'block',
         faces,
         textures: meta.textures,
+        alpha: meta.alpha,
         anims: meta.anims,
         display: meta.displays[id],
         flat: flatSet.has(id),

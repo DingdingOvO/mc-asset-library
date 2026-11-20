@@ -77,11 +77,23 @@ function boundaryDir(face: BakedFace): FaceDir | null {
 export class BlockGeometry {
   private readonly opaqueCache = new Map<string, boolean>()
   private readonly facesCache = new Map<string, BlockFaceRef[]>()
+  /** 满格全不透明方块的 id 集合，来自打包产物 */
+  private readonly opaqueIds: Set<string>
+  /** 纹理 id → 透明度类别（0/1/2） */
+  private readonly alpha: Map<string, number>
 
   constructor(
     private readonly models: BlockModelFile,
     private readonly version: string,
-  ) {}
+  ) {
+    this.opaqueIds = new Set(models.opaque ?? [])
+    this.alpha = new Map()
+    models.textures.forEach((texture, index) => {
+      const value = models.alpha?.[index]
+      // 没有 alpha 表的旧数据：先记「未知」，等真正问到时再按纹素扫
+      if (value === 0 || value === 1 || value === 2) this.alpha.set(texture, value)
+    })
+  }
 
   /** 取方块的面，附带每面是否贴边界 */
   facesOf(id: string): BlockFaceRef[] {
@@ -113,6 +125,10 @@ export class BlockGeometry {
 
   private computeOpaque(id: string): boolean {
     if (id.endsWith(':air') || id === 'air') return false
+    // 打包阶段算好的白名单优先：命中即满格不透明，不用再摸几何和贴图
+    if (this.opaqueIds.size > 0) {
+      return this.opaqueIds.has(id) || this.opaqueIds.has(stripNamespace(id))
+    }
     const refs = this.facesOf(id)
     if (refs.length !== 6) return false
 
@@ -130,6 +146,29 @@ export class BlockGeometry {
       if (!this.textureIsOpaque(texture)) return false
     }
     return true
+  }
+
+  /**
+   * 贴图的透明度类别：0 不透明、1 镂空、2 半透明。
+   *
+   * @constraint 优先读打包阶段算好的表。没有表（旧数据）才退回扫纹素，
+   *      那条路径依赖贴图已经解码，**首次访问时可能给出错误答案**，
+   *      所以它只能是兜底。
+   */
+  alphaOf(texture: string): number {
+    const known = this.alpha.get(texture)
+    if (known !== undefined) return known
+    return this.textureIsOpaque(texture) ? 0 : 1
+  }
+
+  /** 某张贴图是否带透明度，决定要不要进 cutout 批 */
+  isCutout(texture: string): boolean {
+    return this.alphaOf(texture) !== 0
+  }
+
+  /** 某张贴图是否必须混合（水、冰、染色玻璃、玻璃） */
+  isTranslucent(texture: string): boolean {
+    return this.alphaOf(texture) === 2
   }
 
   private readonly textureOpaque = new Map<string, boolean>()
@@ -158,11 +197,6 @@ export class BlockGeometry {
   /** 贴图池索引 → 纹理 id */
   textureOf(index: number): string | null {
     return this.models.textures[index] ?? null
-  }
-
-  /** 某张贴图是否带透明度，决定要不要进 cutout 批 */
-  isCutout(texture: string): boolean {
-    return !this.textureIsOpaque(texture)
   }
 }
 

@@ -219,7 +219,7 @@ export class ModelPipeline {
   renderWorld(
     target: HTMLCanvasElement,
     key: string,
-    batches: { texture: string; data: Uint8Array; vertexCount: number; cutout: boolean }[],
+    batches: { texture: string; data: Uint8Array; vertexCount: number; cutout: boolean; translucent: boolean }[],
     camera: ModelCamera,
     version: string,
   ): RenderStats {
@@ -245,6 +245,13 @@ export class ModelPipeline {
         chunkPos: [0, 0, 0],
         vertexCount: batch.vertexCount,
         order: index,
+        /**
+         * @constraint 半透明批必须真的开混合。以前这里恒定 false，于是水、
+         *      冰、玻璃被画成实心：站在水边看到的是"一块蓝色的墙"，
+         *      玻璃后面的方块完全消失。判定来自打包阶段的 alpha 表。
+         */
+        blend: 'translucent' in batch && batch.translucent === true,
+        doubleSided: true,
       })
     })
 
@@ -256,7 +263,7 @@ export class ModelPipeline {
 
   private voxelEntry(
     key: string,
-    batches: { texture: string; data: Uint8Array; vertexCount: number; cutout: boolean }[],
+    batches: { texture: string; data: Uint8Array; vertexCount: number; cutout: boolean; translucent: boolean }[],
     version: string,
   ): MeshEntry {
     const slot = `voxel|${key}`
@@ -279,7 +286,7 @@ export class ModelPipeline {
         texture: batch.texture,
         data: batch.data,
         vertexCount: batch.vertexCount,
-        translucent: false,
+        translucent: batch.translucent,
         biased: false,
         emissive: false,
         cutout: batch.cutout,

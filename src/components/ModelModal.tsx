@@ -135,7 +135,7 @@ export function ModelModal({
   const blockAnimated = blockAnim !== null
 
   const firstFaces = useMemo(
-    () => (subject?.kind === 'block' ? blockFaces(subject.faces, subject.textures, subject.anims, 0) : null),
+    () => (subject?.kind === 'block' ? blockFaces(subject.faces, subject.textures, subject.anims, 0, subject.alpha) : null),
     [subject],
   )
 
@@ -157,7 +157,7 @@ export function ModelModal({
       const frame = blockAnim
         ? Math.floor(Math.floor(t * 20) / blockAnim.frametime) % blockAnim.steps
         : 0
-      return blockFaces(subject.faces, subject.textures, subject.anims, frame)
+      return blockFaces(subject.faces, subject.textures, subject.anims, frame, subject.alpha)
     },
     [subject, speed, blockAnim],
   )

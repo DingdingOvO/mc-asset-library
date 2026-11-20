@@ -33,6 +33,12 @@ export type Subject =
        *      少了这项，水流快一倍、岩浆朝一个方向硬循环。
        */
       anims?: Record<string, TextureAnim>
+      /**
+       * 透明度类别表（与 textures 平行）：0 不透明、1 镂空、2 半透明。
+       * @why 玻璃、水、冰必须走混合，否则会被画成实心——玻璃背后的东西全被盖住。
+       *      判定来自打包产物，不看贴图有没有下载完。
+       */
+      alpha?: number[]
       display?: DisplayTransform | null
       /** 平面物品：正对相机才看得清，斜着看会被压扁 */
       flat?: boolean
@@ -101,7 +107,7 @@ export function subjectPivot(
   blockFacesAt0?: Face3D[] | null,
 ): [number, number, number] {
   if (subject.kind === 'block') {
-    const faces = blockFacesAt0 ?? blockFaces(subject.faces, subject.textures, subject.anims, 0)
+    const faces = blockFacesAt0 ?? blockFaces(subject.faces, subject.textures, subject.anims, 0, subject.alpha)
     return pivotOf(faces)
   }
   const rest = subject.poser.pose({ t: 0, speed: 0, pitch: 0, yaw: 0 })
@@ -233,7 +239,7 @@ export function ModelView({
     return (frame: number): Face3D[] => {
       const hit = cache.get(frame)
       if (hit) return hit
-      const built = blockFaces(subject.faces, subject.textures, subject.anims, frame)
+      const built = blockFaces(subject.faces, subject.textures, subject.anims, frame, subject.alpha)
       cache.set(frame, built)
       return built
     }

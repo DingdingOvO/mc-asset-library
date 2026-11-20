@@ -143,7 +143,7 @@ export class Program {
     if (this.missing.has(name)) return
     this.missing.add(name)
     // 不是错误：着色器里被 `#ifdef` 关掉的分支不会有这个 uniform
-    if (import.meta.env?.DEV) console.warn(`[render] uniform 不存在（可能被 #ifdef 关掉）：${name}`)
+    if (import.meta.env?.DEV) console.debug(`[render] uniform 不存在（可能被 #ifdef 关掉）：${name}`)
   }
 }
 

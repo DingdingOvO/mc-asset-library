@@ -4,12 +4,15 @@
  * @why 结构页此前只有 GPU 路径：`hasWebGl()` 为假时直接显示一句"浏览器不支持"，
  *      画布永远空白。用户看到的「3D 崩了」有一半是这种情况——禁用了硬件加速、
  *      远程桌面、虚拟机、企业策略都会关掉 WebGL。结构是**一次性静态预览**，
- *      不像实时场景那样要求每帧 60fps，用画家算法填几千个三角形完全够用，
- *      一帧一两百毫秒，切换结构时才重画一次。
+ *      不像实时场景那样要求每帧 60fps，用画家算法填几千个三角形完全够用。
  *
  * @constraint 顶点格式必须与 `BLOCK_LAYOUT` 一致（stride 32：位置 3×f32、
  *      颜色 4×u8、UV0 2×f32、UV2 2×f32）。改了布局这里要跟着改，否则读出来
  *      的位置是乱的——表现为"三角形糊成一坨"，而且不报错。
+ *
+ * @constraint 贴图必须逐像素做仿射插值，不能只采第一个顶点。之前整面填一个
+ *      颜色，结构里的草地、砖墙、木板全成了纯色积木，看起来像"低模预览"。
+ *      三角形的 uv 在屏幕空间是线性的，重心坐标插值就是精确解，没有误差。
  */
 
 import { apply3, rotationXYZ } from '../camera/projection'
@@ -20,6 +23,8 @@ import type { VoxelBatch } from './mesher'
 
 const STRIDE = 32
 const RAD = Math.PI / 180
+/** 低于这个 alpha 的纹素当成透明（与地形着色器的 ALPHA_CUTOUT 一致） */
+const ALPHA_CUTOFF = 0.1
 
 export interface VoxelCamera {
   /** 画布边长（物理像素） */
@@ -40,7 +45,9 @@ export interface CpuPaintResult {
   textured: number
 }
 
-interface Paintable {
+/** 一个待填充的屏幕空间三角形 */
+interface Sprite {
+  /** 画家算法排序用的相机空间深度（越小越远） */
   z: number
   x0: number
   y0: number
@@ -48,7 +55,20 @@ interface Paintable {
   y1: number
   x2: number
   y2: number
-  fill: string
+  /** 三个顶点的 uv */
+  u0: number
+  v0: number
+  u1: number
+  v1: number
+  u2: number
+  v2: number
+  /** 顶点色（已含方向亮度） */
+  r: number
+  g: number
+  b: number
+  texel: TexelSource | null
+  /** 贴图带中间 alpha，需要与已有像素混合 */
+  blend: boolean
 }
 
 /**
@@ -76,7 +96,7 @@ export async function paintVoxelsCpu(
     batches.map((batch) => loadTexel(textureSrc(version, batch.texture)).catch(() => null)),
   )
 
-  const items: Paintable[] = []
+  const items: Sprite[] = []
   let textured = 0
 
   for (let b = 0; b < batches.length; b += 1) {
@@ -114,24 +134,12 @@ export async function paintVoxelsCpu(
       if (Math.max(x0, x1, x2) < 0 || Math.min(x0, x1, x2) > size) continue
       if (Math.max(y0, y1, y2) < 0 || Math.min(y0, y1, y2) > size) continue
 
-      // 顶点色已含方向亮度（mesher 里算好的），贴图色再乘上去
-      const cr = view.getUint8(o0 + 12)
-      const cg = view.getUint8(o0 + 13)
-      const cb = view.getUint8(o0 + 14)
-      let r = cr
-      let g = cg
-      let bl = cb
-      if (texel) {
-        const sampled = sampleTexel(texel, view.getFloat32(o0 + 16, true), view.getFloat32(o0 + 20, true))
-        if (sampled) {
-          if (sampled[3] < 128) continue
-          r = (r * sampled[0]) / 255
-          g = (g * sampled[1]) / 255
-          bl = (bl * sampled[2]) / 255
-          textured += 1
-        }
-      }
+      // 退化成一条线的三角形（侧面被压扁）没有填充面积，跳过省像素循环
+      const area = (x1 - x0) * (y2 - y0) - (x2 - x0) * (y1 - y0)
+      if (Math.abs(area) < 1e-6) continue
 
+      // 顶点色已含方向亮度（mesher 里算好的），贴图色再乘上去
+      if (texel) textured += 1
       items.push({
         z: (va[2] + vb[2] + vc[2]) / 3,
         x0,
@@ -140,7 +148,17 @@ export async function paintVoxelsCpu(
         y1,
         x2,
         y2,
-        fill: `rgb(${r | 0},${g | 0},${bl | 0})`,
+        u0: view.getFloat32(o0 + 16, true),
+        v0: view.getFloat32(o0 + 20, true),
+        u1: view.getFloat32(o1 + 16, true),
+        v1: view.getFloat32(o1 + 20, true),
+        u2: view.getFloat32(o2 + 16, true),
+        v2: view.getFloat32(o2 + 20, true),
+        r: view.getUint8(o0 + 12),
+        g: view.getUint8(o0 + 13),
+        b: view.getUint8(o0 + 14),
+        texel: texel ?? null,
+        blend: batch.translucent,
       })
     }
   }
@@ -148,26 +166,91 @@ export async function paintVoxelsCpu(
   // 画家算法：相机空间 z 越小越远（相机朝 -Z 看），先画远的
   items.sort((a, b) => a.z - b.z)
 
-  ctx.clearRect(0, 0, canvas.width, canvas.height)
+  const image = ctx.createImageData(size, size)
+  const out = image.data
+  const width = size
+  const height = size
+
   for (const tri of items) {
-    ctx.beginPath()
-    ctx.moveTo(tri.x0, tri.y0)
-    ctx.lineTo(tri.x1, tri.y1)
-    ctx.lineTo(tri.x2, tri.y2)
-    ctx.closePath()
-    ctx.fillStyle = tri.fill
-    ctx.fill()
+    drawTriangle(out, width, height, tri)
   }
 
+  ctx.putImageData(image, 0, 0)
   return { triangles: items.length, textured }
 }
 
-/** 按归一化 UV 取最近的纹素；贴图是 16×16 像素风，最近邻才对 */
-function sampleTexel(texel: TexelSource, u: number, v: number): [number, number, number, number] | null {
-  const x = Math.min(texel.width - 1, Math.max(0, Math.floor(u * texel.width)))
-  const y = Math.min(texel.height - 1, Math.max(0, Math.floor(v * texel.height)))
-  const i = (y * texel.width + x) * 4
-  const data = texel.data
-  if (i + 3 >= data.length) return null
-  return [data[i]!, data[i + 1]!, data[i + 2]!, data[i + 3]!]
+/**
+ * 填充一个三角形：重心坐标插值 uv，逐像素采样贴图。
+ *
+ * @constraint 混合必须按 over 公式写回目标像素的 alpha，不能直接写 255。
+ *      结构画布本身是透明的，半透明的水叠在不透明地形上要得到"半透明的地形色"，
+ *      叠在空白处要保留 alpha 让页面背景透出来——写死 255 会让水面变成一块实心色。
+ */
+function drawTriangle(
+  out: Uint8ClampedArray,
+  width: number,
+  height: number,
+  tri: Sprite,
+): void {
+  const minX = Math.max(0, Math.floor(Math.min(tri.x0, tri.x1, tri.x2)))
+  const maxX = Math.min(width - 1, Math.ceil(Math.max(tri.x0, tri.x1, tri.x2)))
+  const minY = Math.max(0, Math.floor(Math.min(tri.y0, tri.y1, tri.y2)))
+  const maxY = Math.min(height - 1, Math.ceil(Math.max(tri.y0, tri.y1, tri.y2)))
+  if (minX > maxX || minY > maxY) return
+
+  const area = (tri.x1 - tri.x0) * (tri.y2 - tri.y0) - (tri.x2 - tri.x0) * (tri.y1 - tri.y0)
+  if (Math.abs(area) < 1e-6) return
+  const inv = 1 / area
+  const texel = tri.texel
+  const data = texel?.data
+  const tw = texel?.width ?? 0
+  const th = texel?.height ?? 0
+
+  for (let y = minY; y <= maxY; y += 1) {
+    const py = y + 0.5
+    for (let x = minX; x <= maxX; x += 1) {
+      const px = x + 0.5
+      // 重心坐标：w0 对应 (x1,y1)、(x2,y2) 那条边，其余同理
+      const w0 = ((tri.x1 - px) * (tri.y2 - py) - (tri.x2 - px) * (tri.y1 - py)) * inv
+      const w1 = ((tri.x2 - px) * (tri.y0 - py) - (tri.x0 - px) * (tri.y2 - py)) * inv
+      const w2 = 1 - w0 - w1
+      if (w0 < -1e-4 || w1 < -1e-4 || w2 < -1e-4) continue
+
+      let r = tri.r
+      let g = tri.g
+      let b = tri.b
+      let a = 255
+
+      if (data && tw > 0 && th > 0) {
+        const u = w0 * tri.u0 + w1 * tri.u1 + w2 * tri.u2
+        const v = w0 * tri.v0 + w1 * tri.v1 + w2 * tri.v2
+        const tx = Math.min(tw - 1, Math.max(0, Math.floor(u * tw)))
+        const ty = Math.min(th - 1, Math.max(0, Math.floor(v * th)))
+        const o = (ty * tw + tx) * 4
+        const ta = data[o + 3]! / 255
+        if (ta < ALPHA_CUTOFF) continue
+        r = (r * data[o]!) / 255
+        g = (g * data[o + 1]!) / 255
+        b = (b * data[o + 2]!) / 255
+        a = data[o + 3]!
+      }
+
+      const index = (y * width + x) * 4
+      if (tri.blend) {
+        const sa = a / 255
+        const da = out[index + 3]! / 255
+        const oa = sa + da * (1 - sa)
+        if (oa <= 0) continue
+        out[index] = (r * sa + out[index]! * da * (1 - sa)) / oa
+        out[index + 1] = (g * sa + out[index + 1]! * da * (1 - sa)) / oa
+        out[index + 2] = (b * sa + out[index + 2]! * da * (1 - sa)) / oa
+        out[index + 3] = oa * 255
+      } else {
+        out[index] = r
+        out[index + 1] = g
+        out[index + 2] = b
+        out[index + 3] = a
+      }
+    }
+  }
 }

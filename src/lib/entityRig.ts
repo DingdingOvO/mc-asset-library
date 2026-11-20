@@ -20,6 +20,18 @@ export interface RigPart {
   name: string
   /** 父部件名。pivot 与旋转都相对父部件，和游戏的 ModelPart 树一一对应 */
   parent: string | null
+  /**
+   * 在 `Rig.parts` 里的下标。
+   *
+   * @constraint 父子关系必须用下标表达，不能靠名字查。原版确实存在
+   *      **父子同名**的模型：悦灵、青蛙、嘎枝、鹦鹉螺、幼年美西螈都是
+   *      `root` 套一个也叫 `root` 的子节点。按名字查父会解析成"自己是自己的
+   *      父亲"，`resolve` 一路递归到层数上限、把平移叠加十几次，
+   *      模型被拉成一坨——正是这些生物"渲染坏了"的原因。
+   */
+  index: number
+  /** 父部件的下标，-1 表示根 */
+  parentIndex: number
   /** 枢轴（相对父部件，ModelPart 空间，y 向下） */
   pivot: [number, number, number]
   /** PartPose 的初始弧度 */
@@ -131,19 +143,30 @@ function expandBox(
 
 export function buildRig(model: EntityModel): Rig {
   const parts: RigPart[] = []
+  /**
+   * 名字 → 最近一次出现的下标。
+   * @constraint 必须在处理当前部件**之前**查父、之后登记自己。数据是按父在前、
+   *      子在后展平的，父子同名时这样才能让子节点的父指向它上面那一层，
+   *      而不是指向自己。
+   */
+  const lastByName = new Map<string, number>()
   for (const part of model.parts as EntityPart[]) {
     const verts: number[] = []
     const faces: RigFace[] = []
     for (const box of part.boxes) expandBox(box, model.texW, model.texH, verts, faces)
+    const parent = part.parent ?? null
     parts.push({
       name: part.name,
-      parent: part.parent ?? null,
+      parent,
+      index: parts.length,
+      parentIndex: parent ? (lastByName.get(parent) ?? -1) : -1,
       pivot: [part.pos[0], part.pos[1], part.pos[2]],
       rot: [part.rot[0], part.rot[1], part.rot[2]],
       scale: [part.scale?.[0] ?? 1, part.scale?.[1] ?? 1, part.scale?.[2] ?? 1],
       verts: new Float32Array(verts),
       faces,
     })
+    lastByName.set(part.name, parts.length - 1)
   }
   return {
     texW: model.texW,
@@ -270,29 +293,26 @@ export function rigFaces(
   texture: string,
   style?: LayerStyle,
 ): Face3D[] {
-  const byName = new Map<string, RigPart>()
-  for (const part of rig.parts) byName.set(part.name, part)
-
-  /** 3×3 旋转 + 平移，部件自己的局部变换 */
-  const transforms = new Map<string, { m: number[]; t: number[] }>()
+  /** 3×3 旋转 + 平移，部件自己的局部变换。键是部件下标，同名部件不会互相覆盖 */
+  const transforms = new Map<number, { m: number[]; t: number[] }>()
 
   const resolve = (part: RigPart, depth: number): { m: number[]; t: number[] } => {
-    const hit = transforms.get(part.name)
+    const hit = transforms.get(part.index)
     if (hit) return hit
     const pose = poses.get(part.name) ?? initialPose(part)
     const local = { m: matrix(pose), t: [pose.x, pose.y, pose.z] }
-    const parent = part.parent ? byName.get(part.parent) : null
+    const parent = part.parentIndex >= 0 ? rig.parts[part.parentIndex] : null
     const out = parent && depth < 16 ? compose(resolve(parent, depth + 1), local) : local
-    transforms.set(part.name, out)
+    transforms.set(part.index, out)
     return out
   }
 
-  const visible = (part: RigPart, depth: number, seen: Set<string>): boolean => {
-    if (depth > 16 || seen.has(part.name)) return true
-    seen.add(part.name)
+  const visible = (part: RigPart, depth: number, seen: Set<number>): boolean => {
+    if (depth > 16 || seen.has(part.index)) return true
+    seen.add(part.index)
     const pose = poses.get(part.name)
     if (pose && !pose.visible) return false
-    const parent = part.parent ? byName.get(part.parent) : null
+    const parent = part.parentIndex >= 0 ? rig.parts[part.parentIndex] : null
     return parent ? visible(parent, depth + 1, seen) : true
   }
 

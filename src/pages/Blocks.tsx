@@ -109,6 +109,7 @@ function BlockBrowser({ version }: { version: string }) {
         kind: 'block',
         faces,
         textures: meta.textures,
+        alpha: meta.alpha,
         anims: meta.anims,
         display: meta.displays[id],
         flat: false,

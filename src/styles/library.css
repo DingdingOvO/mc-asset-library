@@ -1587,11 +1587,21 @@
 }
 
 @media (max-width: 640px) {
-  /* @why 七项导航在 390px 下每项只有 38×29，拇指点不准。
-     收紧左右内边距把七项塞进一屏，塞不下时再横滚，并用渐隐暗示还有内容。 */
+  /* @why 八项导航在 390px 下每项只有 38×29，拇指点不准；收紧内边距和字距
+     把八项塞进一屏。塞不下时仍可横滑（760 断点已开 overflow-x）。 */
+  .topbar {
+    padding: 0 10px;
+    gap: 6px;
+  }
+
+  .topbar__nav {
+    gap: 0;
+    margin-left: 2px;
+  }
+
   .topbar__link {
-    padding: 9px 5px;
-    font-size: 12.5px;
+    padding: 9px 4px;
+    font-size: 12px;
   }
 
   .topbar__nav {
@@ -2800,7 +2810,29 @@ button:disabled,
     grid-template-columns: minmax(0, 1fr);
   }
 
-  .struct__list {
-    max-height: 240px;
+  /*
+   * @constraint 手机上预览必须排在列表前面。列表有一千五百多项，放前面意味
+   *      着一进页面先看到一屏文件名，想看建筑还得往下滚——而这一页的主角是建筑。
+   *      用 order 换位置比在 JSX 里写两套顺序干净，DOM 顺序（列表 → 预览）
+   *      对读屏器也更自然。
+   */
+  .struct__stage {
+    order: -1;
   }
+
+  .struct__list {
+    max-height: 46dvh;
+  }
+}
+
+/*
+ * 结构页状态行里的「方块实体未参与预览」说明。
+ * @why 单独一个 class 而不是靠 :nth-child：状态行本身是「N 张贴图 · N 个三角形」，
+ *      这段补充信息必须能换行、能弱化，否则一行挤在 12px 里没人看得清。
+ */
+.struct__hollow {
+  display: inline;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
 }

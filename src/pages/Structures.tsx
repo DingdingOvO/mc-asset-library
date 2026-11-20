@@ -10,11 +10,12 @@
  *      高度关系、门窗位置立刻能读出来。
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { hasWebGl, modelPipeline } from '@/render'
 import { buildVoxelBatches, type VoxelBatch } from '@/render/world/mesher'
 import { paintVoxelsCpu } from '@/render/world/cpuPaint'
 import { createVolume, getBlock, setBlock } from '@/lib/world/terrain'
-import { rasterize, type StructureTemplate } from '@/lib/world/structure'
+import { INVISIBLE_BLOCKS, rasterize, type StructureTemplate } from '@/lib/world/structure'
 import { loadStructure, loadStructureIndex } from '@/lib/world/structureStore'
 import { loadGeometry, texturesOf } from '@/lib/world/geometry'
 import { useAsync } from '@/lib/useAsync'
@@ -74,7 +75,12 @@ function composeVolume(template: StructureTemplate): BlockVolume {
     }
   }
 
-  const voxel = rasterize(template)
+  /**
+   * @constraint 必须先把「玩家看不见的方块」滤掉再铺地形。拼图方块是结构生成
+   *      器的连接器，一座试炼密室里有几十个，全部有贴图有模型；原版在生成
+   *      结束时就消化掉它们，预览里却会变成一堆凭空出现的方块柱子。
+   */
+  const voxel = rasterize(template, (name) => INVISIBLE_BLOCKS.has(name))
   // 草地占最上面那一格，结构从这里往上放
   const baseY = GROUND_DEPTH
 
@@ -157,8 +163,25 @@ export default function Structures() {
   const index = useAsync(`structures:${version ?? ''}`, () =>
     version ? loadStructureIndex(version) : Promise.reject(new Error('版本未就绪')),
   )
+  const [params, setParams] = useSearchParams()
   const [query, setQuery] = useState('')
-  const [selected, setSelected] = useState<string | null>(null)
+  /**
+   * 当前结构写进 URL。
+   * @why 1511 个结构里要找一个具体的（"帮我看看那个远古城市"）靠滚动是不现实的，
+   *      而没有地址就没法把某一个直接发给别人。选中即改 query，刷新、分享、
+   *      后退都能回到同一栋建筑。
+   */
+  const selected = params.get('s')
+  const setSelected = (path: string) => {
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        next.set('s', path)
+        return next
+      },
+      { replace: true },
+    )
+  }
 
   const files = index.data?.files ?? []
   const filtered = useMemo(() => {
@@ -234,6 +257,13 @@ interface Prepared {
   pivot: [number, number, number]
   /** 没有 WebGL2 时走 2D 画家算法，见 `render/world/cpuPaint` */
   cpu: boolean
+  /**
+   * 出现在这个结构里、但没有静态几何的方块。
+   * @why 箱子、告示牌、床这类方块实体由渲染器在运行时拼模型，资源包里**没有**
+   *      elements，方块模型只有一句 particle 贴图。静默跳过会让房间"少一件家具"
+   *      却看不出为什么，所以要把它们报出来。
+   */
+  hollow: string[]
 }
 
 function StructurePreview({ path, version }: PreviewProps) {
@@ -287,8 +317,7 @@ function StructurePreview({ path, version }: PreviewProps) {
     void (async () => {
       const { geometry, models } = await loadGeometry(version, ids)
       const batches = buildVoxelBatches(scene, geometry)
-      const cpu = !hasWebGl()
-      /**
+      const cpu = !hasWebGl()      /**
        * @constraint 贴图只给 GPU 路径预热。CPU 兜底自己按批取纹素，
        *      走 `prepareTextures` 会尝试建 GL 纹理，在没有上下文的
        *      环境里直接抛异常，把整页拖下水。
@@ -300,17 +329,25 @@ function StructurePreview({ path, version }: PreviewProps) {
       const dy = max[1] - min[1]
       const dz = max[2] - min[2]
       /**
-       * @constraint 取景跨度不能用三维对角线。对角线算的是「从角到角」，
-       *      而屏幕上看到的是投影：一栋 13×23×13 的塔对角线 29 格，
-       *      投影出来只有 20 格出头。用对角线会让建筑只占画面四分之一，
-       *      四周留一大圈空白。取「水平对角线」与「高度」的较大者才贴近
-       *      实际投影范围。
+       * @constraint 取景跨度不能用三维对角线，也不能只看水平或只看高度。
+       *      屏幕上看到的是投影：一栋 40×40×60 的塔，水平对角 57 格、高 60 格，
+       *      但俯视 22° 时垂直方向占的是 `60·cos22 + 57·sin22 ≈ 77` 格——
+       *      只取两者最大值（60）会让塔顶和塔基各被裁掉一截。
+       *      按当前俯仰角把两个方向都投到屏幕轴，取较大者才是真正要装下的范围。
        */
+      const horiz = Math.hypot(dx, dz)
+      const pitch = (22 * Math.PI) / 180
+      const span =
+        Math.max(
+          horiz * Math.cos(pitch) + dy * Math.sin(pitch) * 0.6,
+          dy * Math.cos(pitch) + horiz * Math.sin(pitch),
+        ) * 1.06
       setPrepared({
         batches,
-        span: Math.max(Math.hypot(dx, dz), dy) * 1.05,
+        span,
         pivot: [(min[0] + max[0]) / 2, (min[1] + max[1]) / 2, (min[2] + max[2]) / 2],
         cpu,
+        hollow: ids.filter((id) => !INVISIBLE_BLOCKS.has(id) && geometry.facesOf(id).length === 0),
       })
       const triangles = batches.reduce((n, batch) => n + batch.vertexCount / 3, 0)
       setStatus(`${batches.length} 张贴图 · ${Math.round(triangles).toLocaleString()} 个三角形`)
@@ -436,7 +473,21 @@ function StructurePreview({ path, version }: PreviewProps) {
   return (
     <div className="struct__stage">
       <canvas ref={canvasRef} className="struct__canvas" width={size} height={size} />
-      <p className="struct__status">{template.loading ? '读取结构文件…' : status}</p>
+      <p className="struct__status">
+        {template.loading ? '读取结构文件…' : status}
+        {prepared && prepared.hollow.length > 0 && (
+          <span className="struct__hollow" title={prepared.hollow.join('\n')}>
+            {' '}
+            · {prepared.hollow.length} 类方块实体（
+            {prepared.hollow
+              .slice(0, 3)
+              .map((id) => id.replace(/^minecraft:/, ''))
+              .join('、')}
+            {prepared.hollow.length > 3 ? ' 等' : ''}
+            ）的模型在渲染器里，资源包没有静态几何，未参与预览
+          </span>
+        )}
+      </p>
     </div>
   )
 }

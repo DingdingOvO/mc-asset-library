@@ -19,6 +19,8 @@ export interface VoxelBatch {
   vertexCount: number
   /** 贴图带透明像素，需要 cutout 程序 */
   cutout: boolean
+  /** 贴图有中间 alpha（水、冰、玻璃），必须混合且不写深度 */
+  translucent: boolean
 }
 
 /** 满亮光照坐标：方块光 15、天空光 15 */
@@ -124,6 +126,7 @@ export function buildVoxelBatches(volume: BlockVolume, geometry: BlockGeometry, 
       data: writer.data(),
       vertexCount: writer.count,
       cutout: geometry.isCutout(texture),
+      translucent: geometry.isTranslucent(texture),
     })
   }
   return out

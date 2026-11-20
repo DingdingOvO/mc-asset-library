@@ -20,6 +20,7 @@ import { mkdir, readFile, readdir, stat, writeFile, copyFile } from 'node:fs/pro
 import { createHash } from 'node:crypto'
 import { once } from 'node:events'
 import path from 'node:path'
+import { inflateSync } from 'node:zlib'
 import yauzl from 'yauzl'
 
 const ROOT = path.resolve(import.meta.dirname, '..')
@@ -204,6 +205,163 @@ async function pngSize(file) {
   if (handle.length < 24 || handle.readUInt32BE(0) !== 0x89504e47) return null
   return { width: handle.readUInt32BE(16), height: handle.readUInt32BE(20) }
 }
+
+/**
+ * 贴图的透明度类别，写进 blockmodels.json 的 `alpha` 表。
+ *
+ * 0 = 全不透明，1 = 镂空（alpha 只有 0 与 255，走 alpha test），
+ * 2 = 半透明（存在中间 alpha，必须混合）。
+ *
+ * @why 这个判定以前放在浏览器里做：扫已解码的纹素，没有中间值就当镂空。
+ *      问题是它**取决于贴图有没有下载完**——没下载完时 `textureIsOpaque`
+ *      按不透明兜底，于是树叶、蜘蛛网、玻璃被送进不透明程序：透明像素画成
+ *      纯白（一整面白墙），邻接剔除还会把玻璃当实心块，把玻璃后面的面剔掉
+ *      （透过玻璃能看到"空气"）。同一个结构第一次打开时坏、刷新一次就好，
+ *      是最难复现的那类 bug。放到打包阶段算，跟加载顺序彻底解耦。
+ */
+async function textureAlpha(file) {
+  const png = await readFile(file).catch(() => null)
+  if (!png || png.length < 33 || png.readUInt32BE(0) !== 0x89504e47) return null
+
+  let pos = 8
+  let head = null
+  let palette = null
+  let trns = null
+  const chunks = []
+  while (pos + 8 <= png.length) {
+    const length = png.readUInt32BE(pos)
+    const type = png.toString('ascii', pos + 4, pos + 8)
+    const body = png.subarray(pos + 8, pos + 8 + length)
+    if (type === 'IHDR') {
+      head = {
+        width: body.readUInt32BE(0),
+        height: body.readUInt32BE(4),
+        depth: body[8],
+        color: body[9],
+        interlace: body[12],
+      }
+    } else if (type === 'IDAT') chunks.push(body)
+    else if (type === 'PLTE') palette = body
+    else if (type === 'tRNS') trns = body
+    else if (type === 'IEND') break
+    pos += 12 + length
+  }
+  // 交错 PNG 的扫描线布局完全不同，方块贴图里没有；返回 null 让调用方退回
+  // 浏览器端的纹素扫描（够用，只是可能慢一帧）
+  if (!head || head.interlace !== 0 || chunks.length === 0) return null
+
+  const channels = { 0: 1, 2: 3, 3: 1, 4: 2, 6: 4 }[head.color]
+  if (!channels) return null
+
+  /**
+   * @constraint 不能假设一像素一字节。Mojang 的贴图大量使用低位深调色板 PNG
+   *      （树叶是 4bit、蜘蛛网是 2bit、水的动画竖图也是 4bit）。按 8bit 读
+   *      会把整行样本数算成 1/2 或 1/4，alpha 全落回 255，这些贴图被判定成
+   *      「不透明」——树叶和蜘蛛网于是画成实心白块。
+   */
+  const bitsPerPixel = channels * head.depth
+  const stride = Math.ceil((head.width * bitsPerPixel) / 8)
+  const bpp = Math.max(1, Math.ceil(bitsPerPixel / 8))
+  const maxSample = (1 << head.depth) - 1
+
+  let raw
+  try {
+    raw = inflateSync(Buffer.concat(chunks))
+  } catch {
+    return null
+  }
+
+  const out = Buffer.alloc(stride * head.height)
+  let offset = 0
+  for (let y = 0; y < head.height; y += 1) {
+    const filter = raw[offset]
+    offset += 1
+    const line = raw.subarray(offset, offset + stride)
+    offset += stride
+    if (line.length < stride) return null
+    for (let i = 0; i < stride; i += 1) {
+      const left = i >= bpp ? out[y * stride + i - bpp] : 0
+      const up = y > 0 ? out[(y - 1) * stride + i] : 0
+      const upLeft = y > 0 && i >= bpp ? out[(y - 1) * stride + i - bpp] : 0
+      let value = line[i]
+      if (filter === 1) value += left
+      else if (filter === 2) value += up
+      else if (filter === 3) value += (left + up) >> 1
+      else if (filter === 4) {
+        const p = left + up - upLeft
+        const pa = Math.abs(p - left)
+        const pb = Math.abs(p - up)
+        const pc = Math.abs(p - upLeft)
+        value += pa <= pb && pa <= pc ? left : pb <= pc ? up : upLeft
+      }
+      out[y * stride + i] = value & 0xff
+    }
+  }
+
+  /** 取第 y 行第 index 个样本（已按位深归一到 0..maxSample） */
+  const sampleAt = (y, index) => {
+    if (head.depth === 8) return out[y * stride + index]
+    if (head.depth === 16) return out[y * stride + index * 2]
+    const bit = index * head.depth
+    const byte = out[y * stride + (bit >> 3)]
+    return (byte >> (8 - head.depth - (bit & 7))) & maxSample
+  }
+
+  let zero = 0
+  let mid = 0
+  const total = head.width * head.height
+
+  /**
+   * 颜色键透明（PNG 的 tRNS）。
+   *
+   * @constraint 灰度和真彩图**没有 alpha 通道**，透明度只存在于 tRNS 里：
+   *      灰度 2 字节、真彩 6 字节，表示"等于这个颜色的像素全透明"。
+   *      不处理它的话，`grass_block_side_overlay`（灰度 + 颜色键）会被判成
+   *      完全不透明——那 82% 的透明像素会被画成纯黑/纯白，草方块侧面那层
+   *      本该镂空的草边就成了盖住整个侧面的一块色板。
+   */
+  let keyGray = -1
+  let keyRgb = null
+  if (trns) {
+    if (head.color === 0 && trns.length >= 2) keyGray = (trns[0] << 8) | trns[1]
+    else if (head.color === 2 && trns.length >= 6) {
+      keyRgb = [(trns[0] << 8) | trns[1], (trns[2] << 8) | trns[3], (trns[4] << 8) | trns[5]]
+    }
+  }
+
+  for (let y = 0; y < head.height; y += 1) {
+    for (let x = 0; x < head.width; x += 1) {
+      let alpha = 255
+      if (head.color === 6) alpha = scaleAlpha(sampleAt(y, x * channels + 3), head.depth)
+      else if (head.color === 4) alpha = scaleAlpha(sampleAt(y, x * channels + 1), head.depth)
+      else if (head.color === 3) {
+        const index = sampleAt(y, x)
+        alpha = trns && index < trns.length ? trns[index] : 255
+      } else if (head.color === 0 && keyGray >= 0) {
+        alpha = sampleAt(y, x) === keyGray ? 0 : 255
+      } else if (head.color === 2 && keyRgb) {
+        const same =
+          sampleAt(y, x * channels) === keyRgb[0] &&
+          sampleAt(y, x * channels + 1) === keyRgb[1] &&
+          sampleAt(y, x * channels + 2) === keyRgb[2]
+        alpha = same ? 0 : 255
+      }
+      if (alpha === 0) zero += 1
+      else if (alpha < 250) mid += 1
+    }
+  }
+
+  if (mid / total > 0.02) return 2
+  return zero > 0 ? 1 : 0
+}
+
+/** 低位深的 alpha 样本（0..2^d-1）换算到 0..255 */
+function scaleAlpha(value, depth) {
+  if (depth === 8) return value
+  if (depth === 16) return value
+  return Math.round((value * 255) / ((1 << depth) - 1))
+}
+
 
 async function walk(dir, base = dir) {
   const out = []
@@ -1322,6 +1480,31 @@ function rotate90(point, x, y, origin) {
 }
 
 /**
+ * 面的朝向：4 个顶点在某一轴上全为 0 或全为 16 时，这一面贴在格边界上。
+ *
+ * @constraint 只看坐标，不看顶点绕序算出来的面法线。烘焙数据的绕序不统一，
+ *      靠叉积会把一部分面的朝向判反（前端 `blockGeometry` 里踩过同一个坑）。
+ */
+function boundaryDirOf(face) {
+  for (let axis = 0; axis < 3; axis += 1) {
+    let allZero = true
+    let allMax = true
+    for (let i = 0; i < 4; i += 1) {
+      const value = face[i * 3 + axis] ?? 0
+      if (value !== 0) allZero = false
+      if (value !== 16) allMax = false
+    }
+    if (allZero || allMax) {
+      const positive = allMax
+      if (axis === 0) return positive ? 'posX' : 'negX'
+      if (axis === 1) return positive ? 'posY' : 'negY'
+      return positive ? 'posZ' : 'negZ'
+    }
+  }
+  return null
+}
+
+/**
  * 预烘焙所有方块与物品模型。
  *
  * @constraint 面数据格式（每面 23 个数）：
@@ -1517,6 +1700,9 @@ async function buildBlockModels(outDir, version) {
     return texturePool.length - 1
   }
 
+  /** 打包阶段就确定「这张贴图必须混合」的纹理名 */
+  const forceTranslucent = new Set()
+
   const fillFrames = async () => {
     for (let i = 0; i < texturePool.length; i += 1) {
       const anim = await readAnim(texturePool[i])
@@ -1526,9 +1712,28 @@ async function buildBlockModels(outDir, version) {
     }
   }
 
+  /**
+   * 解析一个贴图引用，返回 `[纹理 id, 是否强制半透明]`。
+   *
+   * @constraint 贴图值有两种写法，两种都必须认：
+   *      `"top": "block/stone"` 和 26.3 起的 `"top": {"sprite": "block/glass",
+   *      "force_translucent": true}`。只处理字符串的话，`#all` → 对象 → 判定
+   *      「不是字符串」直接返回 null，整块玻璃、全部玻璃板、红石粉、染色玻璃
+   *      会**一个面都没有**——在结构页里表现成"透明的方块直接变白底"，
+   *      在方块页里表现成这些方块整片消失。163 个贴图条目受影响。
+   * @constraint `force_translucent` 要跟着纹理走而不是跟着面走：它描述的是
+   *      材质本身（玻璃、水、冰），任何模型引用这张贴图都该混合。
+   */
   const resolveTexture = (textures, ref, depth = 0) => {
-    if (typeof ref !== 'string' || ref.length === 0 || depth > 5) return null
-    if (!ref.startsWith('#')) return ref.replace(/^minecraft:/, '')
+    if (depth > 5) return null
+    if (ref && typeof ref === 'object') {
+      const sprite = ref.sprite ?? ref.texture ?? null
+      const inner = typeof sprite === 'string' ? resolveTexture(textures, sprite, depth + 1) : null
+      if (!inner) return null
+      return [inner[0], inner[1] || ref.force_translucent === true]
+    }
+    if (typeof ref !== 'string' || ref.length === 0) return null
+    if (!ref.startsWith('#')) return [ref.replace(/^minecraft:/, ''), false]
     const next = textures[ref.slice(1)]
     return next ? resolveTexture(textures, next, depth + 1) : null
   }
@@ -1542,8 +1747,10 @@ async function buildBlockModels(outDir, version) {
     const geom = FACE_VERTEX[dir]
     if (!geom) return
 
-    const texture = resolveTexture(textures, face.texture)
-    if (!texture) return
+    const resolved = resolveTexture(textures, face.texture)
+    if (!resolved) return
+    const [texture, translucent] = resolved
+    if (translucent) forceTranslucent.add(texture)
 
     const from = element.from
     const to = element.to
@@ -1738,6 +1945,47 @@ async function buildBlockModels(outDir, version) {
   await fillFrames()
 
   /**
+   * 贴图透明度类别表（与 `textures` 平行）。
+   * @why 见 `textureAlpha`：这个判定必须发生在打包阶段，不能留给浏览器按
+   *      「贴图下没下载完」来猜。
+   */
+  const alphaPool = new Array(texturePool.length).fill(0)
+  await Promise.all(
+    texturePool.map(async (name, index) => {
+      const scanned = await textureAlpha(path.join(outDir, 'textures', `${name}.png`))
+      // force_translucent 是材质声明，优先于像素统计：玻璃的 alpha 只有 0/255，
+      // 单看像素会被判成镂空，但原版把它放在 translucent 批次里画
+      alphaPool[index] = forceTranslucent.has(name) ? 2 : (scanned ?? 0)
+    }),
+  )
+
+  /**
+   * 满格全不透明方块：邻接剔除的白名单。
+   *
+   * @why 前端原来的做法是「运行时扫贴图像素」，同样受加载时序影响：贴图没到齐
+   *      时按不透明兜底，玻璃会被当成实心块，紧贴它的那面墙被剔掉，透过玻璃
+   *      看到的是空气。这里一次算清，运行时只查表。
+   * @constraint 必须同时满足「六个方向各有一面」和「贴图全不透明」。只看贴图
+   *      会把台阶（顶面 16×8、也有 6 个边界方向）算成满块，台阶旁边的地面
+   *      会被啃掉一块。
+   */
+  const opaquePool = []
+  for (const [id, faces] of Object.entries(blocks)) {
+    if (faces.length !== 6) continue
+    const dirs = new Set()
+    let solid = true
+    for (const face of faces) {
+      const dir = boundaryDirOf(face)
+      if (!dir || dirs.has(dir) || alphaPool[face[20]] !== 0) {
+        solid = false
+        break
+      }
+      dirs.add(dir)
+    }
+    if (solid && dirs.size === 6) opaquePool.push(id)
+  }
+
+  /**
    * 面数据分片。
    *
    * @why 1160 个方块 + 1574 个物品的面数据合起来 2.2MB，而列表页首屏只需要
@@ -1770,6 +2018,8 @@ async function buildBlockModels(outDir, version) {
       textures: texturePool,
       frames: framePool,
       anims: animPool,
+      alpha: alphaPool,
+      opaque: opaquePool,
       // @constraint 索引清单必须留在 meta 里：列表页要先知道有哪些方块才能排版，
       //      面数据到滚动时再按片取。顺序就是切片顺序，前端据此算分片下标。
       blockIds,

@@ -105,7 +105,7 @@ async function renderIcon(
 
   const [canvas, ctx] = makeCanvas(size)
   if (faces && faces.length > 0 && !flat) {
-    const geometry: Face3D[] = blockFaces(faces, meta.textures, meta.anims, 0)
+    const geometry: Face3D[] = blockFaces(faces, meta.textures, meta.anims, 0, meta.alpha)
     drawScene(ctx, {
       faces: geometry,
       size,

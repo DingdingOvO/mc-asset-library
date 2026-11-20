@@ -6,19 +6,7 @@
  */
 import type { BakedFace } from './blockmodels'
 import type { Face3D } from './scene'
-
-/**
- * 群系着色：草、树叶、水在资源包里是灰度图，颜色由代码乘上去。
- * @constraint 游戏里草地颜色取自当前群系（平原是 0x91BD59），这里固定成平原，
- *             否则同一张灰度图会在不同方块上出现不同颜色，看着像 bug。
- */
-const TINTS: Record<number, [number, number, number]> = {
-  0: [0.568, 0.741, 0.349],
-  1: [0.467, 0.671, 0.278],
-  2: [0.247, 0.463, 0.894],
-  /** 水：0x3F76E4，和 2 同色但分开写——2 是「水方块」的历史色调，3 给液体立方体用 */
-  3: [0.247, 0.463, 0.894],
-}
+import { tintOf } from './tint'
 
 /**
  * 动画贴图的完整参数：[帧数, frametime, 回放序列]。
@@ -66,6 +54,8 @@ export function blockFaces(
   textures: string[],
   anims: Record<string, TextureAnim> | undefined,
   frame = 0,
+  /** 透明度类别表（与 textures 平行），决定这一面要不要混合 */
+  alpha?: number[],
 ): Face3D[] {
   const out: Face3D[] = []
   for (const face of faces) {
@@ -89,8 +79,9 @@ export function blockFaces(
       pts: [face[0]!, face[1]!, face[2]!, face[3]!, face[4]!, face[5]!, face[6]!, face[7]!, face[8]!, face[9]!, face[10]!, face[11]!],
       uv,
       tex,
-      tint: tintIndex >= 0 ? TINTS[tintIndex] : undefined,
+      tint: tintOf(tintIndex) ?? undefined,
       shade: (face[22] ?? 1) === 1,
+      translucent: alpha?.[index] === 2,
     })
   }
   return out

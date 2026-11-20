@@ -38,6 +38,12 @@ export interface Face3D {
   bias?: number
   /** 满亮渲染：眼睛、发光层在游戏里不吃光照 */
   unlit?: boolean
+  /**
+   * 贴图带中间 alpha（玻璃、水、冰、染色玻璃），必须混合并且不写深度。
+   * @why 不标的话玻璃会被画成实心：透过玻璃能看到的那面墙被它整块盖住，
+   *      表现成"玻璃变成一块白板"。判定来自打包阶段的 `alpha` 表。
+   */
+  translucent?: boolean
 }
 
 export interface DisplayTransform {

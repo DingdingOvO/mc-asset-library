@@ -69,8 +69,9 @@ pnpm run setup:lite   # 下载约 130MB，落盘 145MB；完整版再多半 GB �
 | `render/camera/projection.ts` | JOML `Matrix4f.rotationXYZ` 语义（`Rx·Ry·Rz`），CPU 与 GPU 共用一份 |
 | `render/core/buffer.ts` `BLOCK_LAYOUT` | `DefaultVertexFormat.BLOCK` 的字段顺序与归一化方式 |
 | `render/world/mesher.ts` | 邻接剔除规则：只有「邻居是不透明满格」才丢面，玻璃/树叶之间保留 |
-| `lib/world/nbt.ts` · `structure.ts` | `NbtIo` 的位宽与 gzip 约定；`StructureTemplate` 的 palette 下标、`Rotation` 四档、`Mirror` |
-| `lib/entityRig.ts` · `entityMesh.ts` | `ModelPart$Cube` 的逐盒 UV 展开，跨度 0 的面丢弃 |
+| `scripts/fetch-assets.mjs` `textureAlpha` | `RenderType` 的三档（solid / cutout / translucent）。位深 1/2/4/8/16、调色板 + `tRNS`、灰度 + 颜色键、真彩 + `tRNS` 全部按 PNG 规范解，贴在模型上的 `force_translucent` 优先于像素统计 |
+| `lib/world/nbt.ts` · `structure.ts` | `NbtIo` 的位宽与 gzip 约定；`StructureTemplate` 的 palette 下标、`Rotation` 四档、`Mirror`；`jigsaw`/`structure_block`/`barrier`/`light`/`cave_air` 按"玩家看不见"跳过 |
+| `lib/entityRig.ts` · `entityMesh.ts` | `ModelPart$Cube` 的逐盒 UV 展开，跨度 0 的面丢弃；父子关系按**下标**而不是名字（悦灵、青蛙、嘎枝都是 `root` 套 `root`，按名字查父会解析成自环） |
 | `lib/anim.ts` | `setupAnim` 与 `LivingEntity.updateWalkAnimation` 的逐步复刻 |
 | `lib/mcui/*` | `TooltipRenderUtil`、`NineSlice`、`GuiGraphics.blitSprite`、`AbstractContainerScreen` 的槽位坐标 |
 | `lib/font.ts` | `UnihexProvider.Glyph` 的 `unpackBitsToBytes`、字形 `advance` 规则 |
@@ -80,6 +81,10 @@ pnpm run setup:lite   # 下载约 130MB，落盘 145MB；完整版再多半 GB �
 
 - **环境光遮蔽（AO）**。原版 `BlockModelLighter` 的顶点亮度是 `(该点光照 × 权重 + 三个邻居的光照) × 0.25`，它依赖世界里真实的光照传播。站点没有世界光照（统一按满亮），硬造一个遮蔽系数就只是"加了脏阴影"，不再对应任何原版算法，所以宁可不出这个效果。
 - **Sodium 那套区块网格与顶点压缩**。它解决的是"视距 32 区块、每帧重建脏区块"，而这里最复杂的场景是一次性渲染 1.5 万个方块的静态结构，用不上，也就没有照抄。
+
+一处**已知缺口**，结构页会当场报出来：
+
+- **方块实体（箱子、告示牌、床、头颅、装饰罐）不进结构预览**。它们在资源包里没有 `elements`，模型由 `ChestRenderer` 之类的渲染器在运行时拼出来。结构页底部的状态行会写明"这几类方块实体的模型在渲染器里，未参与预览"，而不是静默少一件家具。要补的话得把 `entitymodels.json` 的盒体转成体素几何，属于另一条流水线，这一版没做。
 
 ## 为什么仓库里没有素材
 

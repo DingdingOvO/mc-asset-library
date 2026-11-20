@@ -181,6 +181,21 @@ p {
   padding: 32px 20px 64px;
 }
 
+/*
+ * 分栏页（结构、界面工作台）用的容器。
+ *
+ * @why 不能用 .container：它的 max-width 是 1080，结构页要「窄列表 + 大画布」，
+ *      被卡在 1080 时画布只剩 700 出头，宽屏上右半边全是空白。
+ * @constraint 内边距必须和 .container 一致。漏掉的话标题、面包屑、搜索框
+ *      会紧贴屏幕左边缘——手机上看起来像样式没加载。
+ */
+.page {
+  width: 100%;
+  max-width: 1600px;
+  margin: 0 auto;
+  padding: 32px 20px 64px;
+}
+
 .page-head {
   display: flex;
   flex-direction: column;
@@ -418,8 +433,9 @@ p {
 }
 
 @media (max-width: 640px) {
-  .container {
-    padding: 24px 16px 48px;
+  .container,
+  .page {
+    padding: 20px 14px 44px;
   }
 
   .grid {
