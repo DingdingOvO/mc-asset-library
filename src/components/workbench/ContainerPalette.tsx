@@ -39,9 +39,15 @@ export interface ContainerPaletteProps {
   defs: Map<string, ContainerDef>
   loading: boolean
   onAdd: (id: string) => void
+  /**
+   * 悬停。@why 页面上有两种提示：容器**内部**的槽位是游戏画面（像素九宫格），
+   * 容器**外面**的列表是网页控件（站点浮层）。这里必须走后者，
+   * 否则左边一列中文列表弹的是游戏气泡，右边物品栏弹的是网页卡片。
+   */
+  onHover?: (text: { title: string; note?: string; sub?: string } | null, at: { x: number; y: number } | null) => void
 }
 
-export function ContainerPalette({ defs, loading, onAdd }: ContainerPaletteProps) {
+export function ContainerPalette({ defs, loading, onAdd, onHover }: ContainerPaletteProps) {
   return (
     <>
       {loading && <p className="empty">读取中…</p>}
@@ -57,7 +63,15 @@ export function ContainerPalette({ defs, loading, onAdd }: ContainerPaletteProps
                 type="button"
                 className={`palette__item${def.id === 'hotbar' ? ' palette__item--hero' : ''}`}
                 onClick={() => onAdd(def.id)}
-                title={`${def.screen} · ${def.width}×${def.height} · ${def.slots.length} 槽`}
+                title={onHover ? undefined : `${def.screen} · ${def.width}×${def.height} · ${def.slots.length} 槽`}
+                onPointerEnter={(event) => {
+                  const box = event.currentTarget.getBoundingClientRect()
+                  onHover?.(
+                    { title: def.name, note: `${def.width}×${def.height} · ${def.slots.length} 槽`, sub: def.screen },
+                    { x: box.right, y: box.top },
+                  )
+                }}
+                onPointerLeave={() => onHover?.(null, null)}
               >
                 <span className="palette__name">{def.name}</span>
                 <span className="palette__meta">

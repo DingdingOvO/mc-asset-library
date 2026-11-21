@@ -410,7 +410,12 @@ function Workshop({ version }: { version: string }) {
 
       <div className="workbench__body">
         <aside className="workbench__side workbench__side--left">
-          <ContainerPalette defs={defs} loading={containers.loading} onAdd={addContainer} />
+          <ContainerPalette
+            defs={defs}
+            loading={containers.loading}
+            onAdd={addContainer}
+            onHover={(text, at) => setPaletteTip(text && at ? { ...text, ...at } : null)}
+          />
         </aside>
 
         <div className="workbench__center">
