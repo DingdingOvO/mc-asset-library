@@ -714,7 +714,7 @@ export function ModelView({
     }
   }, [subject, facesOf, blockAnim, textureKey, version, pixels, animated, onViewChange, frame, pivot])
 
-  /** 松手/停止时把最终角度交出去，别让导出面板拿着 120ms 前的值 */
+  /** 松手/停止时把最终角度交出去，别让导出面板拿着节流窗口内的旧值 */
   const flush = () => {
     const yaw = normalizeYaw(spin.current.ry)
     const live = viewLive.current ?? { rotX: spin.current.rx, rotY: yaw, zoom: 1, light: 1, blur: 0, outline: 0 }
