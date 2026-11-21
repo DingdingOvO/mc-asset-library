@@ -671,7 +671,13 @@ function paintGpu(
     if (!pipeline.ready(faces as ModelFace[], options.version)) return false
     const stats = pipeline.render(
       layer.canvas,
-      options.gpuKey ?? `f${faces.length}|${options.version}`,
+      /**
+       * @constraint 没给缓存键就按"每帧都不一样"处理（空键 = 独占槽位、每帧重建）。
+       *      不能退回按面数拼的键：木板、台阶、按钮都是 6 面，键完全相同，
+       *      后画的会命中先画的网格——导出物品图标时满屏都是同一块木板，
+       *      导出动画时整段视频冻结在第一帧姿势。
+       */
+      options.gpuKey ?? '',
       faces as ModelFace[],
       {
         size: options.size,

@@ -350,6 +350,33 @@ export function ModelView({
       : [...new Set((staticFaces ?? []).map((face) => face.tex).filter((tex) => tex.includes('/')))].join('|')
 
   /**
+   * 几何身份：两块方块共用同一张贴图时，光看贴图分不出来。
+   *
+   * @why 缩略图位图缓存和 GPU 网格缓存此前只拿贴图名当键。木板、台阶、楼梯、
+   *      栅栏、栅栏门、按钮、压力板用的都是 `block/acacia_planks`，键完全相同，
+   *      于是第一块画出来的几何被余下全部方块复用——列表里栅栏、楼梯、按钮
+   *      长得一模一样，看上去"全都变成按钮了"。缓存键必须能区分几何。
+   * @constraint 不能改用方块 id：同一个 id 换 blockstate（详情页的"状态"下拉、
+   *      染色、半砖上下）会重建 faces 但 id 不变，按 id 建键会把旧形状钉死在缓存里。
+   *      这里对顶点坐标取样做哈希，几何变了键就变。
+   * @performance 每个方块几十个面、每个面只取两个坐标，一次性 useMemo，
+   *      比对面数组做 JSON.stringify 便宜两个数量级。
+   */
+  const geometryKey = useMemo(() => {
+    if (subject.kind === 'entity') {
+      // 实体网格每帧重建、不进网格缓存，位图缓存只需按骨骼规模与贴图区分
+      return `e${subject.rig.parts.length}|${subject.texture}|${subject.layers?.length ?? 0}`
+    }
+    const faces = subject.faces
+    let hash = faces.length
+    for (const face of faces) {
+      // 取 x 与 y 两个坐标并保留 1/16 格精度：同贴图不同形状（台阶 vs 满格）必不同
+      hash = (Math.imul(hash, 31) + Math.round((face[0] ?? 0) * 16) + Math.round((face[4] ?? 0) * 64)) | 0
+    }
+    return `b${faces.length}.${hash}`
+  }, [subject])
+
+  /**
    * 预载纹理，让 GPU 管线能接管。
    *
    * @why 渲染循环是同步的（rAF 里不能 await）。纹理没就绪时
@@ -515,9 +542,13 @@ export function ModelView({
        *      第一次画出来那一帧会被永久记住。以前只排除了 blockAnim，实体卡片
        *      悬停播放时每一帧都命中缓存，看起来"打开了动画但完全没动"。
        */
+      /**
+       * @constraint 键里必须带 geometryKey。只有贴图名的键会让所有共用贴图的
+       *      方块（木板/台阶/楼梯/栅栏/按钮）互相命中同一张位图。
+       */
       const cacheKey = interactive || blockAnim || animatedLive.current
         ? null
-        : `t|${textureKey}|${pixels}|${Math.round(spin.current.rx)}|${Math.round(spin.current.ry)}|${Math.round((live?.light ?? 1) * 100)}|${Math.round((live?.zoom ?? 1) * 100)}`
+        : `t|${geometryKey}|${textureKey}|${pixels}|${Math.round(spin.current.rx)}|${Math.round(spin.current.ry)}|${Math.round((live?.light ?? 1) * 100)}|${Math.round((live?.zoom ?? 1) * 100)}`
       if (cacheKey) {
         const hit = thumbCache.get(cacheKey)
         if (hit) {
@@ -561,12 +592,16 @@ export function ModelView({
        *      方块动画只有几帧，按帧缓存能省掉每帧的网格重建；
        *      实体姿势每帧都不同，缓存等于每帧写一份新网格，只有坏处。
        */
+      /**
+       * @constraint 键里必须带 geometryKey：GPU 网格缓存命中后直接复用顶点缓冲，
+       *      不再比对 faces。同贴图不同形状的方块会画出同一份网格。
+       */
       const gpuKey =
         subject.kind === 'entity'
           ? ''
           : blockAnim
-            ? `${textureKey}|${Math.floor(Math.floor(elapsed * 20) / blockAnim.frametime) % blockAnim.steps}`
-            : textureKey
+            ? `${geometryKey}|${textureKey}|${Math.floor(Math.floor(elapsed * 20) / blockAnim.frametime) % blockAnim.steps}`
+            : `${geometryKey}|${textureKey}`
       drawScene(ctx, {
         faces,
         size: pixels,

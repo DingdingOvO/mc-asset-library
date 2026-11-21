@@ -481,6 +481,23 @@ p {
   z-index: 1;
 }
 
+/**
+ * 页面切换的入场。
+ * @why 只做入场不做退场：路由一变旧页面立刻卸载，没有可动画的对象；
+ *      要退出动画得同时挂两棵页面树，状态与 canvas 都会翻倍。
+ * @constraint 只用 opacity，不加 transform：transform 会让 main 成为
+ *      containing-box，动画那 220ms 里任何 fixed 子孙都会跟着错位。
+ */
+@keyframes page-in {
+  from {
+    opacity: 0;
+  }
+}
+
+.shell > main {
+  animation: page-in 0.22s cubic-bezier(0.22, 0.61, 0.36, 1);
+}
+
 @media (max-width: 720px) {
   /* @why 导航项在窄屏被挤成竖排单字，允许横向滚动并压缩间距 */
   .topbar {

@@ -1,7 +1,15 @@
-import { Link, NavLink, Outlet } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { ThemeToggle } from './ThemeToggle'
 
 export function AppShell() {
+  /**
+   * @why 给 main 换 key：路由一变就重建这个容器，入场动画才会重放。
+   *      只靠 CSS transition 没有可过渡的初末状态——旧页面在同一帧被卸载了。
+   * @constraint key 只取 pathname，不能带上 search：搜索框每敲一个字都会改
+   *      query，带上就会让整页闪一下。
+   */
+  const { pathname } = useLocation()
+
   return (
     <div className="shell">
 
@@ -43,7 +51,7 @@ export function AppShell() {
         <span className="topbar__spacer" />
         <ThemeToggle />
       </header>
-      <main>
+      <main key={pathname}>
         <Outlet />
       </main>
       <footer className="footer">

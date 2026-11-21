@@ -242,11 +242,14 @@
   border-radius: var(--radius);
   background: none;
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition:
+    background 0.16s cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 0.16s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 .tex-cell:hover {
   background: var(--surface-muted);
+  transform: translateY(-1px);
 }
 
 .tex-cell[aria-pressed='true'] {
@@ -310,7 +313,7 @@
   padding: 24px;
   background: rgb(10 12 16 / 48%);
   backdrop-filter: blur(3px);
-  animation: modal-fade 0.14s ease;
+  animation: modal-fade 0.2s ease;
 }
 
 .modal {
@@ -327,7 +330,7 @@
   background: var(--surface);
   box-shadow: 0 24px 64px rgb(0 0 0 / 28%);
   overflow: hidden;
-  animation: modal-rise 0.16s ease;
+  animation: modal-rise 0.26s cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .modal__close {
@@ -487,7 +490,7 @@
 @keyframes modal-rise {
   from {
     opacity: 0;
-    transform: translateY(8px) scale(0.99);
+    transform: translateY(14px) scale(0.972);
   }
 }
 
@@ -828,11 +831,16 @@
   border-radius: var(--radius);
   background: none;
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition:
+    background 0.16s cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 0.16s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 .block-cell:hover {
   background: var(--surface-muted);
+  /* @why 抬 1px：网格 gap 只有 2px，抬多了会压到上一行；
+     1px 足够让人看出"这张被指到了" */
+  transform: translateY(-1px);
 }
 
 .block-cell[aria-pressed='true'] {
@@ -1430,11 +1438,14 @@
   border-radius: var(--radius);
   background: none;
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition:
+    background 0.16s cubic-bezier(0.22, 0.61, 0.36, 1),
+    transform 0.16s cubic-bezier(0.22, 0.61, 0.36, 1);
 }
 
 .particle-cell:hover {
   background: var(--surface-muted);
+  transform: translateY(-1px);
 }
 
 .particle-cell[aria-pressed='true'] {
