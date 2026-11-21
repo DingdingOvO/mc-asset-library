@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { frameAt, particleSrc, sizeAt, type ParticleDef } from '@/lib/particles'
+import { useDpr } from '@/lib/dpr'
 
 interface ParticleViewProps {
   version: string
@@ -42,6 +43,11 @@ const autoZoom = (def: ParticleDef): number => {
 export function ParticleView({ version, def, size = 320, zoom, speed = 1, tint, className }: ParticleViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [ready, setReady] = useState(0)
+  /**
+   * @constraint 必须跟随缩放：写死 2 时浏览器放大到 150% 以上，画布被拉伸，
+   *      粒子贴图的像素块先糊成灰边，再被拉伸一次。
+   */
+  const dpr = useDpr()
   const factor = zoom ?? autoZoom(def)
   /** 染色用的离屏画布：source-in 需要独立的 alpha 上下文 */
   const tintCanvas = useRef<HTMLCanvasElement | null>(null)
@@ -68,7 +74,6 @@ export function ParticleView({ version, def, size = 320, zoom, speed = 1, tint, 
       images.push(image)
     }
 
-    const dpr = Math.min(window.devicePixelRatio || 1, 2)
     const pixels = Math.round(size * dpr)
     if (canvas.width !== pixels) {
       canvas.width = pixels
@@ -126,14 +131,14 @@ export function ParticleView({ version, def, size = 320, zoom, speed = 1, tint, 
       alive = false
       cancelAnimationFrame(raf)
     }
-  }, [version, def, size, factor, speed, ready, tint])
+  }, [version, def, size, factor, speed, ready, tint, dpr])
 
   return (
     <canvas
       ref={canvasRef}
       className={className ? `particle-view ${className}` : 'particle-view'}
-      width={Math.round(size * Math.min(window.devicePixelRatio || 1, 2))}
-      height={Math.round(size * Math.min(window.devicePixelRatio || 1, 2))}
+      width={Math.round(size * dpr)}
+      height={Math.round(size * dpr)}
       style={{ width: size, height: size }}
     />
   )

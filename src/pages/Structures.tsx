@@ -21,6 +21,7 @@ import { loadGeometry, texturesOf } from '@/lib/world/geometry'
 import { useAsync } from '@/lib/useAsync'
 import { useLibrary } from '@/lib/useLibrary'
 import type { BlockVolume } from '@/lib/world/terrain'
+import { currentDpr, watchDpr } from '@/lib/dpr'
 
 /** 地形铺法：从上到下。草地 1 层、泥土 2 层、石头打底 */
 const GROUND_LAYERS: { state: string; height: number }[] = [
@@ -282,18 +283,19 @@ function StructurePreview({ path, version }: PreviewProps) {
   const ids = useMemo(() => (scene ? blockIdsOf(scene) : []), [scene])
 
   /**
-   * 绘制缓冲跟随容器。
+   * 绘制缓冲跟随容器与屏幕。
    * @constraint 不能只在挂载时量一次：侧栏是 grid 里的一列，窗口缩放、
    *      字体加载完成都会改它的宽度，量一次之后 canvas 会一直停在旧尺寸上。
-   *      DPR 上限取 2——结构动辄几千个三角形，3 倍屏再乘 9 倍像素不值。
+   * @constraint 浏览器缩放改的是 DPR 而不是元素尺寸，ResizeObserver 收不到。
+   *      之前 DPR 上限写死 2，放大到 150% 以上时整幅结构图被位图拉伸，
+   *      方块的直边变成锯齿块——所以这里同时盯 DPR。
    */
   useEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
     const apply = () => {
       const rect = canvas.getBoundingClientRect()
-      const dpr = Math.min(window.devicePixelRatio || 1, 2)
-      const next = Math.max(240, Math.round(Math.min(rect.width, rect.height || rect.width) * dpr))
+      const next = Math.max(240, Math.round(Math.min(rect.width, rect.height || rect.width) * currentDpr()))
       if (next === canvas.width) return
       canvas.width = next
       canvas.height = next
@@ -302,7 +304,11 @@ function StructurePreview({ path, version }: PreviewProps) {
     apply()
     const observer = new ResizeObserver(apply)
     observer.observe(canvas)
-    return () => observer.disconnect()
+    const stop = watchDpr(apply)
+    return () => {
+      observer.disconnect()
+      stop()
+    }
   }, [])
 
   // 一：装配网格（只在场景变化时跑一次）

@@ -40,6 +40,7 @@ import {
   yawGap,
 } from '@/lib/orbit'
 import { loadTexel } from '@/lib/texel'
+import { DPR_MAX, useDpr } from '@/lib/dpr'
 
 export type Subject =
   | {
@@ -159,12 +160,9 @@ const REPORT_INTERVAL = 150
 /**
  * @constraint 必须按设备真实 DPR 渲染：固定倍率在 2x 屏上会被拉伸，
  *      1.25 倍 → 95px 位图铺 152px 物理像素，糊就是这么来的。
- *      上限 2 防止 3x 屏把光栅化成本翻一倍多。
+ * @constraint 上限已经挪进 lib/dpr.ts 并改成跟随缩放：写死 2 时，浏览器放大到
+ *      150% 以上画布还是 2 倍分辨率，几何的矢量边被位图拉伸，看着就是一堆像素。
  */
-function deviceDpr(): number {
-  if (typeof window === 'undefined') return 1
-  return Math.min(window.devicePixelRatio || 1, 2)
-}
 
 /**
  * 缩略图位图缓存。
@@ -295,8 +293,26 @@ export function ModelView({
     onViewChange?.({ ...live, zoom: value })
   }
 
-  const dpr = deviceDpr()
+  /**
+   * 详情页上限压到 2.5。
+   * @why 详情页的画布边长是缩略图的四到六倍，像素量是平方关系：320px 的画布在
+   *      DPR 3 下是 1008² ≈ 100 万像素，软件光栅化一帧要几百毫秒，拖动直接变
+   *      幻灯片。缩略图只有 76px，3 倍才 228²，加得起的清晰度必须加。
+   *      2.5 倍在 320px 画布上相当于 800px 物理像素，肉眼已经看不出与 3 倍的区别。
+   */
+  const dpr = useDpr(interactive ? 2.5 : DPR_MAX)
   const pixels = Math.round(size * dpr * (interactive ? 1.05 : 1))
+
+  /**
+   * 缩略图的超采样倍数。
+   *
+   * @why 软件光栅化没有 MSAA，几何的边靠"画大再缩回去"来抗锯齿；GPU 路径不需要。
+   *      两者叠加时总量要封顶：DPR 3 再乘 1.5 就是 4.5 倍线性、20 倍面积，
+   *      一百张卡片同时挂载会把主线程堵住半秒。
+   * @constraint 目标总采样按 2.6 倍算：DPR 1 的老屏补到 2.6，DPR 3 的屏自己就够，
+   *      此时 ss=1 而不是继续往上叠。交互页另有自适应（quality.ss）。
+   */
+  const restSupersample = Math.max(1, 2.6 / dpr)
 
   /**
    * 方块的面按帧解包并按帧缓存。
@@ -610,7 +626,7 @@ export function ModelView({
         fit: subject.kind === 'entity' ? 'auto' : 'block',
         display: subject.kind === 'block' ? (subject.display ?? null) : null,
         version,
-        supersample: quality.current.ss,
+        supersample: interactive ? quality.current.ss : restSupersample,
         zoom: live?.zoom ?? 1,
         light: live?.light ?? 1,
         motionBlur: (live?.blur ?? 0) * activity.current,
@@ -747,7 +763,7 @@ export function ModelView({
       observer?.disconnect()
       stopTicks?.()
     }
-  }, [subject, facesOf, blockAnim, textureKey, version, pixels, animated, onViewChange, frame, pivot])
+  }, [subject, facesOf, blockAnim, textureKey, version, pixels, restSupersample, interactive, animated, onViewChange, frame, pivot])
 
   /** 松手/停止时把最终角度交出去，别让导出面板拿着节流窗口内的旧值 */
   const flush = () => {
