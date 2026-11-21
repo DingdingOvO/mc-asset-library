@@ -10,8 +10,15 @@ export function AppShell() {
    */
   const { pathname } = useLocation()
 
+  /**
+   * 工作台页面占满视口，不显示页脚。
+   * @why `/ui` 的外壳高度是 `100dvh - 顶栏`，页脚再占 60px 就会多出一条滚动条：
+   *      整块画布永远露出半截页脚，看起来像布局没对齐。
+   */
+  const fullBleed = pathname === '/ui'
+
   return (
-    <div className="shell">
+    <div className={fullBleed ? 'shell shell--full' : 'shell'}>
 
       <header className="topbar">
         <Link to="/" className="topbar__brand">

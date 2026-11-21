@@ -22,6 +22,9 @@ import { useAsync } from '@/lib/useAsync'
 import { useLibrary } from '@/lib/useLibrary'
 import type { BlockVolume } from '@/lib/world/terrain'
 import { currentDpr, watchDpr } from '@/lib/dpr'
+import { runTarget, suggestName, targetsFor } from '@/lib/export/registry'
+import { saveBlob } from '@/lib/export/types'
+import type { StructureSubject } from '@/lib/export/structure'
 
 /** 地形铺法：从上到下。草地 1 层、泥土 2 层、石头打底 */
 const GROUND_LAYERS: { state: string; height: number }[] = [
@@ -272,6 +275,15 @@ function StructurePreview({ path, version }: PreviewProps) {
   const [status, setStatus] = useState('准备中…')
   const [pose, setPose] = useState({ rotX: 22, rotY: 40, zoom: 1 })
   const [prepared, setPrepared] = useState<Prepared | null>(null)
+  /**
+   * 导出参数。
+   * @why 静帧尺寸单独给：预览画布是按窗口分配的，720p 窗口里截出来只有 700 多
+   *      像素，拿去做视频封面不够；3D 文件不受尺寸影响。
+   */
+  const [stillSize, setStillSize] = useState(1024)
+  const [backdrop, setBackdrop] = useState<'transparent' | '#ffffff' | '#11141a'>('transparent')
+  const [busy, setBusy] = useState<string | null>(null)
+  const [note, setNote] = useState<string | null>(null)
   /** 绘制缓冲边长（物理像素）。按容器实测尺寸 × DPR 算，写死会在高分屏上糊 */
   const [size, setSize] = useState(768)
 
@@ -476,6 +488,50 @@ function StructurePreview({ path, version }: PreviewProps) {
     }
   }, [])
 
+  /**
+   * 导出对象。
+   * @why 复用预览的机位与枢轴：用户在页面上转到哪个角度，导出的静帧就是那个
+   *      角度。分开算的话「看着好导出歪」会反复出现。
+   */
+  const subject = useMemo<StructureSubject | null>(() => {
+    if (!prepared || !path) return null
+    return {
+      kind: 'structure',
+      id: path,
+      version,
+      batches: prepared.batches,
+      rotX: pose.rotX,
+      rotY: pose.rotY,
+      zoom: pose.zoom,
+      span: prepared.span,
+      pivot: prepared.pivot,
+      size: stillSize,
+      backdrop: backdrop === 'transparent' ? null : backdrop,
+    }
+  }, [prepared, path, version, pose, stillSize, backdrop])
+
+  const targets = useMemo(() => (subject ? targetsFor(subject) : []), [subject])
+
+  const runExport = async (id: string) => {
+    const target = targets.find((item) => item.id === id)
+    if (!target || !subject) return
+    setBusy(id)
+    setNote(null)
+    try {
+      const blob = await runTarget(subject, target)
+      if (!blob) {
+        setNote('导出失败：这个结构没有可导出的几何')
+        return
+      }
+      saveBlob(blob, suggestName(subject, target))
+      setNote(`已导出 ${target.label}`)
+    } catch (failure) {
+      setNote(`导出失败：${failure instanceof Error ? failure.message : String(failure)}`)
+    } finally {
+      setBusy(null)
+    }
+  }
+
   return (
     <div className="struct__stage">
       <canvas ref={canvasRef} className="struct__canvas" width={size} height={size} />
@@ -494,6 +550,44 @@ function StructurePreview({ path, version }: PreviewProps) {
           </span>
         )}
       </p>
+
+      <div className="struct__export">
+        <span className="struct__export-label">导出</span>
+        {targets.map((target) => (
+          <button
+            key={target.id}
+            type="button"
+            className="chip chip--ghost"
+            disabled={busy !== null}
+            title={target.hint}
+            onClick={() => void runExport(target.id)}
+          >
+            {busy === target.id ? '导出中…' : target.label}
+          </button>
+        ))}
+        <label className="struct__export-field">
+          静帧
+          <select value={stillSize} onChange={(event) => setStillSize(Number(event.target.value))}>
+            {[512, 768, 1024, 2048].map((value) => (
+              <option key={value} value={value}>
+                {value}px
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="struct__export-field">
+          底色
+          <select
+            value={backdrop}
+            onChange={(event) => setBackdrop(event.target.value as 'transparent' | '#ffffff' | '#11141a')}
+          >
+            <option value="transparent">透明</option>
+            <option value="#ffffff">白</option>
+            <option value="#11141a">深</option>
+          </select>
+        </label>
+        {note && <span className="struct__export-note">{note}</span>}
+      </div>
     </div>
   )
 }

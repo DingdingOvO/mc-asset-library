@@ -1,6 +1,8 @@
 import { useCallback, useMemo, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { SearchBox } from '@/components/SearchBox'
 import { McTooltip, type TipState } from '@/components/McTooltip'
+import { SiteTip, type SiteTipState } from '@/components/SiteTip'
 import { BACKDROPS as EXPORT_BACKDROPS, type ExportBackdrop } from '@/lib/containerRender'
 import { loadContainers, type ContainerDef, type EffectName } from '@/lib/containers'
 import { defaultParams } from '@/lib/layerRender'
@@ -12,6 +14,7 @@ import { Stage } from '@/components/workbench/Stage'
 import { StatePanel } from '@/components/workbench/StatePanel'
 import { Toolbar } from '@/components/workbench/Toolbar'
 import { ContainerPalette } from '@/components/workbench/ContainerPalette'
+import { ScreenStudio } from '@/components/workbench/ScreenStudio'
 import { useLibrary } from '@/lib/useLibrary'
 import { runTarget, suggestName, targetsFor, type ExportTarget } from '@/lib/export/registry'
 import { saveBlob } from '@/lib/export/types'
@@ -37,7 +40,64 @@ export default function Ui() {
   if (error) return <p className="notice notice--error container">版本清单加载失败：{error.message}</p>
   if (loading || !version) return <p className="empty">正在读取容器布局…</p>
 
-  return <Workshop version={version} />
+  return <UiBody version={version} />
+}
+
+/**
+ * 页签：容器工作台 + 三种非容器界面。
+ *
+ * @why 告示牌 / 书 / 地图没有槽位和物品，数据模型与容器完全不同，硬塞进同一个
+ *      工作台会让 `Workspace` 里长出一半用不到的字段。放在同一页的不同页签里，
+ *      共用的只有字体、缩放与导出。
+ */
+const TABS = [
+  { id: 'workbench', zh: '容器工作台' },
+  { id: 'sign', zh: '告示牌' },
+  { id: 'book', zh: '书与笔' },
+  { id: 'map', zh: '地图' },
+] as const
+
+type TabId = (typeof TABS)[number]['id']
+
+function UiBody({ version }: { version: string }) {
+  const [params, setParams] = useSearchParams()
+  const raw = params.get('view')
+  const tab: TabId = TABS.some((item) => item.id === raw) ? (raw as TabId) : 'workbench'
+
+  const pick = (id: TabId) => {
+    setParams(
+      (prev) => {
+        const next = new URLSearchParams(prev)
+        if (id === 'workbench') next.delete('view')
+        else next.set('view', id)
+        return next
+      },
+      { replace: true },
+    )
+  }
+
+  return (
+    <div className="ui-shell">
+      <nav className="ui-tabs" aria-label="界面类型">
+        {TABS.map((item) => (
+          <button
+            key={item.id}
+            type="button"
+            className={`ui-tabs__item${item.id === tab ? ' ui-tabs__item--on' : ''}`}
+            aria-pressed={item.id === tab}
+            onClick={() => pick(item.id)}
+          >
+            {item.zh}
+          </button>
+        ))}
+      </nav>
+      {tab === 'workbench' ? (
+        <Workshop version={version} />
+      ) : (
+        <ScreenStudio version={version} kind={tab} />
+      )}
+    </div>
+  )
 }
 
 function Workshop({ version }: { version: string }) {
@@ -59,7 +119,13 @@ function Workshop({ version }: { version: string }) {
   const [lang, setLang] = useState<'zh' | 'en'>('zh')
   const [busy, setBusy] = useState<string | null>(null)
   const [note, setNote] = useState<string | null>(null)
-  const [tip, setTip] = useState<TipState | null>(null)
+  /**
+   * 两种悬停提示分开存：`slotTip` 画在容器里（原版九宫格），
+   * `paletteTip` 是物品栏那个网页控件（站点浮层）。混用一个状态就会出现
+   * 「在物品栏上悬停，弹出的却是游戏提示框」。
+   */
+  const [slotTip, setSlotTip] = useState<TipState | null>(null)
+  const [paletteTip, setPaletteTip] = useState<SiteTipState | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
   /** 拖拽中的物品 id 与指针位置；两者都非空时才画跟随的幽灵块 */
   const [dragItem, setDragItem] = useState<string | null>(null)
@@ -133,7 +199,7 @@ function Workshop({ version }: { version: string }) {
         if (Math.hypot(moveEvent.clientX - from.x, moveEvent.clientY - from.y) < 5) return
         active = true
         setDragItem(id)
-        setTip(null)
+        setSlotTip(null)
       }
       setDragAt({ x: moveEvent.clientX, y: moveEvent.clientY })
     }
@@ -180,17 +246,18 @@ function Workshop({ version }: { version: string }) {
     }
   }
 
-  const onSlotHover = (uid: string, slot: number | null, at: { x: number; y: number } | null) => {    if (slot === null || !at) {
-      setTip(null)
+  const onSlotHover = (uid: string, slot: number | null, at: { x: number; y: number } | null) => {
+    if (slot === null || !at) {
+      setSlotTip(null)
       return
     }
     const node = state.nodes.find((entry) => entry.uid === uid)
     const item = node?.items[slot]
     if (!item) {
-      setTip(null)
+      setSlotTip(null)
       return
     }
-    setTip({
+    setSlotTip({
       x: at.x,
       y: at.y,
       title: nameOf(item.id),
@@ -413,14 +480,15 @@ function Workshop({ version }: { version: string }) {
             onPick={(item) => setHeld({ id: item.id, count: stack })}
             onDragStart={(event, id) => beginItemDrag(event, id)}
             onHover={(item, at) =>
-              setTip(item && at ? { x: at.x, y: at.y, title: item.n || item.id, sub: item.id } : null)
+              setPaletteTip(item && at ? { x: at.x, y: at.y, title: item.n || item.id, sub: item.id } : null)
             }
             truncated={filtered.length - shown.length}
           />
         </aside>
       </div>
 
-      <McTooltip tip={tip} version={version} />
+      <McTooltip tip={slotTip} version={version} />
+      <SiteTip tip={paletteTip} />
     </div>
   )
 }

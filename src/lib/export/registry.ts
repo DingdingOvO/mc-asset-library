@@ -18,6 +18,7 @@ import {
   type ModelSubject,
 } from './model'
 import { LAYOUT_TARGETS } from './layout'
+import { exportStructureSolid, exportStructureStill, type StructureSubject } from './structure'
 import {
   defineTarget,
   GROUP_ORDER,
@@ -189,7 +190,75 @@ export const MODEL_TARGETS: ExportTarget[] = [
   }),
 ]
 
-export const ALL_TARGETS: ExportTarget[] = [...LAYOUT_TARGETS, ...MODEL_TARGETS]
+const isStructure = (subject: Subject): subject is StructureSubject => subject.kind === 'structure'
+
+/**
+ * 结构页的导出清单。
+ *
+ * @why 结构是「一整块静态几何」，没有骨骼也没有时长，所以既没有视频也没有
+ *      PSD——只有 3D 文件和静帧。允许导出的格式按这个事实筛，不是按页面类型筛。
+ * @constraint 静帧尺寸由 subject.size 决定（页面里可选），不在这里写死：
+ *      同一栋房子有人要 1080 封面，有人只要 512 贴进 wiki。
+ */
+export const STRUCTURE_TARGETS: ExportTarget[] = [
+  defineTarget<StructureSubject>({
+    id: 'glb',
+    label: 'GLB',
+    group: '3d',
+    hint: '单文件 glTF，贴图一起嵌进去',
+    ext: 'glb',
+    slow: true,
+    appliesTo: isStructure,
+    fileName: (subject) => `${slug(subject.id)}.glb`,
+    run: (subject) => exportStructureSolid(subject, 'glb'),
+  }),
+  defineTarget<StructureSubject>({
+    id: 'gltf',
+    label: 'glTF',
+    group: '3d',
+    hint: 'model.gltf + bin + 贴图，可文本查看',
+    ext: 'zip',
+    slow: true,
+    appliesTo: isStructure,
+    fileName: (subject) => `${slug(subject.id)}-gltf.zip`,
+    run: (subject) => exportStructureSolid(subject, 'gltf'),
+  }),
+  defineTarget<StructureSubject>({
+    id: 'obj',
+    label: 'OBJ',
+    group: '3d',
+    hint: 'obj + mtl + 贴图，DCC 通吃',
+    ext: 'zip',
+    slow: true,
+    appliesTo: isStructure,
+    fileName: (subject) => `${slug(subject.id)}-obj.zip`,
+    run: (subject) => exportStructureSolid(subject, 'obj'),
+  }),
+  defineTarget<StructureSubject>({
+    id: 'stl',
+    label: 'STL',
+    group: '3d',
+    hint: '只有三角形，3D 打印用；没有贴图',
+    ext: 'stl',
+    slow: true,
+    appliesTo: isStructure,
+    fileName: (subject) => `${slug(subject.id)}.stl`,
+    run: (subject) => exportStructureSolid(subject, 'stl'),
+  }),
+  defineTarget<StructureSubject>({
+    id: 'still',
+    label: '单帧 PNG',
+    group: 'raster',
+    hint: '当前角度的一张静帧，尺寸按右侧选择',
+    ext: 'png',
+    slow: true,
+    appliesTo: isStructure,
+    fileName: (subject) => `${slug(subject.id)}-${subject.size}.png`,
+    run: exportStructureStill,
+  }),
+]
+
+export const ALL_TARGETS: ExportTarget[] = [...LAYOUT_TARGETS, ...MODEL_TARGETS, ...STRUCTURE_TARGETS]
 
 export function targetsFor(subject: Subject): ExportTarget[] {
   return ALL_TARGETS.filter((target) => target.appliesTo(subject))
@@ -220,7 +289,12 @@ export function suggestName(subject: Subject, target: ExportTarget): string {
     const custom = target.fileName(subject)
     if (custom) return custom
   }
-  const base = subject.kind === 'layout' ? (subject as LayoutSubject).name : (subject as ModelSubject).id
+  const base =
+    subject.kind === 'layout'
+      ? subject.name
+      : subject.kind === 'structure'
+        ? subject.id
+        : subject.id
   return `${slug(base) || 'mc-asset'}-${slug(target.id)}-${stamp()}.${target.ext}`
 }
 
@@ -229,4 +303,4 @@ export async function runTarget(subject: Subject, target: ExportTarget): Promise
   return target.run(subject)
 }
 
-export type { ExportGroup, ExportTarget, Subject, LayoutSubject, ModelSubject }
+export type { ExportGroup, ExportTarget, Subject, LayoutSubject, ModelSubject, StructureSubject }

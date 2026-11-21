@@ -17,6 +17,7 @@ import type { ContainerDef } from '../containers'
 import type { RenderOptions } from '../exportLayers'
 import type { Workspace } from '../workspace'
 import type { ModelSubject } from './model'
+import type { StructureSubject } from './structure'
 
 /** 分组只影响界面上怎么摆，不影响能力 */
 export type ExportGroup = 'raster' | 'layered' | 'vector' | 'data' | '3d' | 'video'
@@ -45,7 +46,7 @@ export interface LayoutSubject {
   backdrop: string | null
 }
 
-export type Subject = LayoutSubject | ModelSubject
+export type Subject = LayoutSubject | ModelSubject | StructureSubject
 
 export interface ExportTarget {
   id: string

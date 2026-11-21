@@ -85,6 +85,41 @@ pnpm run setup:lite   # 下载约 130MB，落盘 145MB；完整版再多半 GB �
 | `lib/font.ts` | `UnihexProvider.Glyph` 的 `unpackBitsToBytes`、字形 `advance` 规则 |
 | `scripts/extract-tabs.py` | 直接读 `client.jar` 里 `CreativeModeTabs` 的字节码，配合 `BlockItemIds` / `ItemIds` 的 `create("...")` 还原真实 id |
 
+### 界面页：容器与非容器分开
+
+`/ui` 的四种界面共用字体、整数缩放与导出，但**数据模型不同**：
+
+| 页签 | 做法 | 为什么不能合并 |
+|---|---|---|
+| 容器工作台 | `lib/workspace.ts` 的节点 + 槽位，容器几何来自 `containers.json` | 有槽位、有物品、有状态参数 |
+| 告示牌 | `lib/mcui/screens.ts` 直接画 `gui/signs/<木种>.png`，四行文本居中落进板面 | 没有槽位，只有四行文字 |
+| 书与笔 | `book.png` 左上 192×192，正文按 114px 折行 | 正文是流式排版 |
+| 地图 | `map/map_background.png` + `map/decorations/*` 标记 | 内容是一组坐标点 |
+
+硬把后三种塞进容器工作台，会让 `Workspace` 里长出一半用不到的字段（`sign_lines`、`book_text`…），而它们之间没有任何共享逻辑。
+
+悬停提示也分成两套，界线是**游戏画面的边界**：
+
+- 容器**内部**的槽位 → `McTooltip`，九宫格 + `ascii.png` 位图字，与原版一致
+- 容器**外面**的物品栏 → `SiteTip`，站点自己的圆角卡片；给网页控件套像素边框不是「还原原版」，只是把浏览器装扮成游戏
+
+### 字形表要覆盖 CJK
+
+`scripts/extract-font-zh.py --full` 会把 CJK 统一表意文字（U+4E00–U+9FFF）与中日韩标点一起抽出来：告示牌、书页要能写任意中文，只抽语言文件里那几百个字的话，用户敲进去的第三句话就是一排问号。产物 2MB（gzip 后约 500KB），随仓库提交，CI 不重建。
+
+### 结构也能导出
+
+结构页的格式清单和模型页共用一张注册表（`lib/export/registry.ts`）：`GLB` / `glTF` / `OBJ` / `STL` / `单帧 PNG`。几何从 GPU 的顶点缓冲里还原（`lib/export/structure.ts`）：
+
+| 步骤 | 注意点 |
+|---|---|
+| 解包顶点 | `BLOCK_LAYOUT` 步长 32：位置 f32×3、颜色 u8×4、UV f32×2 |
+| 补法线 | 方块顶点没有法线（六档亮度烘焙在顶点色里），按三角形叉积现算，否则导进 Blender 是一坨平面 |
+| 原点 | 底面贴 `y=0`、XZ 居中，与模型导出同规则 |
+| 文件名 | 结构 id 是 `village/plains/houses/...`，写进 OBJ 的 `mtllib` 会让 Blender 去找一个不存在的子目录，材质静默丢失 |
+
+静帧不复用屏幕 canvas：那是按窗口尺寸分配的，720p 窗口里截出来只有 700 多像素。按页面选的 `512/768/1024/2048` 重新跑一遍渲染。
+
 ### 转台交互
 
 `lib/orbit.ts` 是唯一维护角度的状态机，预览与导出都从它取值：

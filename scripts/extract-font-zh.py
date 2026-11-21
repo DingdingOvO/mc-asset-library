@@ -13,7 +13,11 @@ hex 每行形如 `7BB1:10401040...`（码点 + 32 个十六进制字符），32 
 @why 整包 7.7MB 不能直接下发：站点是给做视频的人用的，为几十个标题字
       多等 7MB 不值得。这里只抽语言文件里真正出现过的字，产物 2KB 上下。
 
-用法：python3 scripts/extract-font-zh.py [mc-assets 根目录]
+@why `--full` 另外把 CJK 统一表意文字整块收进来：告示牌、书页要能写任意
+      中文，只覆盖语言文件里那几百个字的话，用户敲进去的第三句话就是
+      一排问号。整块约 2.1 万字，产物 1 MB 出头，对做视频的人值得。
+
+用法：python3 scripts/extract-font-zh.py [mc-assets 根目录] [--full]
 """
 
 import json
@@ -118,7 +122,9 @@ def bounds(bits):
 
 
 def main():
-    asset_root = sys.argv[1] if len(sys.argv) > 1 else None
+    args = [item for item in sys.argv[1:] if not item.startswith('--')]
+    full = '--full' in sys.argv
+    asset_root = args[0] if args else None
     if asset_root:
         global ASSETS
         ASSETS = os.path.join(asset_root, VERSION)
@@ -137,6 +143,13 @@ def main():
             # ascii 用 ascii.png，这里只收图集外的字
             if ord(ch) >= 0x100:
                 chars.add(ch)
+
+    if full:
+        # @why 只多收这三块：表意文字、中日韩标点、全角符号。Emoji 与扩展 B
+        #      区的生僻字 unifont 里可能是空白格，收进来只增加体积。
+        for start, end in ((0x3000, 0x303F), (0x4E00, 0x9FFF)):
+            for code in range(start, end + 1):
+                chars.add(chr(code))
 
     hexes = read_hex(font_zip)
     glyphs = {}
