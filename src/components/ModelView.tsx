@@ -11,15 +11,34 @@ import {
   DEFAULT_ROTATION,
   ENTITY_ROTATION,
   FLAT_ROTATION,
+  boundsOf,
+  centerOf,
   drawScene,
   emptyCameraBox,
   frameAroundPivot,
-  frameFromBox,
   measureFaces,
+  mergeBounds,
   pivotOf,
+  type Bounds,
   type DisplayTransform,
   type Face3D,
 } from '@/lib/scene'
+import {
+  beginDrag,
+  createOrbit,
+  dragOrbit,
+  endDrag,
+  GLIDE_WINDOW,
+  PITCH_PER_PX,
+  YAW_PER_PX,
+  nearestYaw,
+  normalizeYaw,
+  orbitBusy,
+  seekOrbit,
+  snapOrbit,
+  stepOrbit,
+  yawGap,
+} from '@/lib/orbit'
 import { loadTexel } from '@/lib/texel'
 
 export type Subject =
@@ -98,28 +117,44 @@ interface ModelViewProps {
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
 /**
- * 转台枢轴：模型自己包围盒的中心。
+ * 转台枢轴：模型在整个动画范围内的几何中心。
+ *
  * @why 方块是 8,8,8 没错，但生物的原点在脚底、身高 32 甚至 40，绕 8 转就是
- *      绕着膝盖甩——拖动时整只生物在画面里画圈。导出面板也要用这个值。
+ *      绕着膝盖甩——拖动时整只生物在画面里画圈。
+ * @constraint 生物不能只量静止姿势：垂手站着时中心在腰，抬臂迈腿之后
+ *      中心偏到另一侧，转起来模型会"甩偏"几像素。必须把整个步态周期
+ *      量一遍取并集中心，转动轴才落在模型的实际中心上。
  */
 export function subjectPivot(
   subject: Subject,
   blockFacesAt0?: Face3D[] | null,
+  /** 动画相位采样数。列表卡片站着不动，量一帧就够 */
+  phases = 8,
 ): [number, number, number] {
   if (subject.kind === 'block') {
     const faces = blockFacesAt0 ?? blockFaces(subject.faces, subject.textures, subject.anims, 0, subject.alpha)
     return pivotOf(faces)
   }
-  const rest = subject.poser.pose({ t: 0, speed: 0, pitch: 0, yaw: 0 })
-  return pivotOf(entityFaces(subject.rig, rest, subject.texture, subject.layers))
+  let union: Bounds | null = null
+  const count = Math.max(1, phases)
+  for (let i = 0; i < count; i += 1) {
+    const pose = subject.poser.pose({ t: i / count, speed: 1, pitch: 0, yaw: 0 })
+    union = mergeBounds(union, boundsOf(entityFaces(subject.rig, pose, subject.texture, subject.layers)))
+  }
+  return union ? centerOf(union) : [0, 0, 0]
 }
 
-/** 转动速度：每像素多少度 */
-const YAW_PER_PX = 0.62
-const PITCH_PER_PX = 0.5
-/** 松手后的惯性衰减（每帧保留比例）与停止阈值（度/帧） */
-const INERTIA_DECAY = 0.9
-const INERTIA_STOP = 0.08
+/** 缩放范围：小于 0.4 模型缩成一粒，大于 3 只剩几个像素的贴图 */
+const ZOOM_MIN = 0.4
+const ZOOM_MAX = 3
+
+/**
+ * 拖动中向父组件回报的最小间隔（毫秒）。
+ * @why 每一像素都 setState 会重渲染整个弹窗（音效列表、下载面板、视角滑块），
+ *      拖动因此掉到 30fps 以下，手指上就是"跟不上"。松手时另有一次性回报，
+ *      所以这个间隔只影响滑块数字的刷新率。
+ */
+const REPORT_INTERVAL = 150
 
 /**
  * @constraint 必须按设备真实 DPR 渲染：固定倍率在 2x 屏上会被拉伸，
@@ -186,19 +221,29 @@ export function ModelView({
   const baseRy = base[1]
 
   /**
-   * 转动状态放在 ref 里而不是 state。
+   * 角度状态放在 ref 里而不是 state。
    *
    * @why 拖动的每一像素都 setState 会重渲染整个弹窗（含下载面板），而且渲染
    *      循环的依赖里有 rotX/rotY，每次重渲染都要拆掉重装 rAF——动画相位因此
-   *      每拖一下就归零，模型在拖动过程中"抽搐"。转动必须是渲染循环自己维护的量：
-   *      指针只改目标值，循环负责逼近、惯性、重绘。
+   *      每拖一下就归零，模型在拖动过程中"抽搐"。角度只由渲染循环自己的
+   *      状态机维护，见 lib/orbit.ts。
    */
-  const spin = useRef({ rx: baseRx, ry: baseRy, trx: baseRx, try: baseRy, vrx: 0, vry: 0 })
+  const spin = useRef(createOrbit(baseRx, baseRy))
   /** 上次上报给父组件的角度，用来区分"外部改的"和"自己报回去的" */
   const reported = useRef<{ x: number; y: number }>({ x: baseRx, y: baseRy })
   const dirty = useRef(true)
-  const dragging = useRef(false)
+  /** 当前按下的指针（多指时用第一个，两指进入捏合缩放） */
+  const pointers = useRef(new Map<number, { x: number; y: number }>())
+  /** 捏合起点：两指距离与当时的缩放 */
+  const pinch = useRef<{ dist: number; zoom: number } | null>(null)
+  /** 上一点的位置：单指拖动的增量基准 */
   const pending = useRef<{ x: number; y: number } | null>(null)
+  /**
+   * 最近一小段时间的指针轨迹。
+   * @why 松手速度要按窗口平均算。逐帧差分会把"松手前最后一帧零位移"当成静止，
+   *      甩出去的手感全部丢掉。
+   */
+  const trail = useRef<{ t: number; x: number; y: number }[]>([])
   /** 时间轴自己累计，不随循环重建归零 */
   const clock = useRef(0)
   /** 自适应画质：帧时间超标就降超采样，省得高 DPR 屏卡成幻灯片 */
@@ -222,6 +267,33 @@ export function ModelView({
   speedLive.current = speed
   const animatedLive = useRef(animated)
   animatedLive.current = animated
+
+  /**
+   * 缩放的本地值。
+   *
+   * @why 滚轮/捏合每动一下都要立刻看到结果，而父组件的 state 要等一次重渲染
+   *      才回来。只读父组件的话，同一帧里的多个滚轮事件会各自拿同一个基准乘，
+   *      滚十格只放大一档。本地值先落，再按需上报。
+   */
+  const zoomLocal = useRef(view?.zoom ?? 1)
+  useEffect(() => {
+    zoomLocal.current = view?.zoom ?? 1
+  }, [view?.zoom])
+
+  const applyZoom = (next: number) => {
+    const value = clamp(next, ZOOM_MIN, ZOOM_MAX)
+    if (Math.abs(value - zoomLocal.current) < 0.002) return
+    zoomLocal.current = value
+    const live = viewLive.current ?? {
+      rotX: spin.current.rx,
+      rotY: spin.current.ry,
+      zoom: value,
+      light: 1,
+      blur: 0,
+      outline: 0,
+    }
+    onViewChange?.({ ...live, zoom: value })
+  }
 
   const dpr = deviceDpr()
   const pixels = Math.round(size * dpr * (interactive ? 1.05 : 1))
@@ -305,35 +377,36 @@ export function ModelView({
   }, [textureKey, version])
 
   /**
-   * 转台枢轴：模型自己包围盒的中心。
-   * @why 方块是 8,8,8 没错，但生物的原点在脚底、身高 32 甚至 40，绕 8 转就是
-   *      绕着膝盖甩，拖动时整只生物在画面里画圈。
+   * 转台枢轴：整个动画范围内的几何中心（见 subjectPivot）。
    */
   const pivot = useMemo(() => {
     if (fixedPivot) return fixedPivot
-    return subjectPivot(subject, staticFaces)
-  }, [subject, staticFaces, fixedPivot])
+    return subjectPivot(subject, staticFaces, interactive ? 8 : 1)
+  }, [subject, staticFaces, fixedPivot, interactive])
 
   /**
    * 取景框：一次算死，之后动画与拖动都不再变。
    *
    * @why 不锁的话包围盒随每帧姿势变化，缩放跟着变——走路时整只生物在"呼吸"。
-   *      水平方向再采样几个角度取并集：枢轴在中心，各角度包围盒宽度不同，
-   *      只按默认角度算，转到侧面就会出框；按并集算则转动过程中缩放恒定。
+   * @constraint 水平方向必须量满一圈（8 个方位，45° 一档），不能只量四个角：
+   *      转到 180°~315° 时模型的横向宽度和首帧差得多，用首帧的跨度会在转动
+   *      过程中出框（或者反过来，非对角角度显得很小）。
    */
   const frame = useMemo(() => {
     const cam = emptyCameraBox()
-    const yaws = interactive ? [0, 45, 90, 135] : [0]
+    const yaws = interactive ? [0, 45, 90, 135, 180, 225, 270, 315] : [0]
     /**
      * @constraint 缩略图只量一个姿势。之前不区分，一张 68px 的卡片也要把 8 个相位
      *      各展开一遍骨骼——首屏 96 张就是 768 次 rigFaces，主线程被卡住 70ms 以上。
      *      站着不动的预览量一帧就够。
+     * @constraint 详情页把姿势采样降到 4 个相位，换取把方位从 4 个扩到 8 个：
+     *      总次数不变（32 次），但转动时不再有角度出框。
      */
-    const poses = interactive || animated ? 8 : 1
+    const poses = interactive ? 4 : animated ? 8 : 1
     for (const turn of yaws) {
       if (subject.kind === 'entity') {
         for (let i = 0; i < poses; i += 1) {
-          const pose = subject.poser.pose({ t: i * 0.25, speed, pitch: 0, yaw: 0 })
+          const pose = subject.poser.pose({ t: i * (1 / poses), speed, pitch: 0, yaw: 0 })
           measureFaces(
             entityFaces(subject.rig, pose, subject.texture, subject.layers),
             { rotX: baseRx, rotY: baseRy + turn, pivot },
@@ -348,8 +421,15 @@ export function ModelView({
         )
       }
     }
-    // 实体必须让枢轴正好落在画面中心；方块保留包围盒中心，带 display 位移的才不歪
-    return subject.kind === 'entity' ? frameAroundPivot(cam) : frameFromBox(cam)
+    /**
+     * @constraint 方块也按枢轴取景，不再用「包围盒中心」。
+     *      frameFromBox 取的是并集包围盒的中心，而枢轴是模型自身的中心：
+     *      非对称模型（楼梯、门、火把）两者差得很明显，转起来是绕着屏幕外
+     *      某个点甩，用户说的"中心点很怪"就是这里。
+     *      带 display 位移的方块把位移量补上即可——那段位移与旋转无关。
+     */
+    const shift = subject.kind === 'block' ? subject.display?.translation : null
+    return frameAroundPivot(cam, shift ? [shift[0]! / 16, shift[1]! / 16] : undefined)
   }, [subject, speed, baseRx, baseRy, pivot, staticFaces, interactive, animated])
 
   /**
@@ -362,8 +442,10 @@ export function ModelView({
 
   // 换模型：枢轴与机位一起回默认
   useEffect(() => {
-    spin.current = { rx: baseRx, ry: baseRy, trx: baseRx, try: baseRy, vrx: 0, vry: 0 }
+    snapOrbit(spin.current, baseRx, baseRy)
     reported.current = { x: baseRx, y: baseRy }
+    pointers.current.clear()
+    pinch.current = null
     trailFresh.current = true
     dirty.current = true
   }, [subject, baseRx, baseRy])
@@ -371,19 +453,33 @@ export function ModelView({
   /**
    * 外部改角度（滑块、重置按钮）时采纳，自己上报的回声则忽略。
    * @why 不区分的话，父组件把我们的角度存进 state 再传回来，会被当成
-   *      "外部要求跳到这个角度"，正在做的平滑与惯性每帧被打断。
+   *      "外部要求跳到这个角度"，正在做的滑行每帧被打断。
+   * @constraint 滑块要平滑跟手（seek），重置按钮干脆瞬移（snap）：
+   *      两者都从同一条路进来，靠"差多少"区分——差得远就是重置。
    */
   useEffect(() => {
     if (!view) return
-    if (Math.abs(view.rotX - reported.current.x) < 1e-3 && Math.abs(view.rotY - reported.current.y) < 1e-3) {
-      return
-    }
-    spin.current.trx = view.rotX
-    spin.current.rx = view.rotX
-    spin.current.try = view.rotY
-    spin.current.ry = view.rotY
-    spin.current.vrx = 0
-    spin.current.vry = 0
+    /**
+     * @constraint 比较必须按环形距离：内部角度是连续的（可能已经 720°），
+     *      父组件给的是归一化后的 -180..180。直接用差值比，每次上报都会被
+     *      误判成"外部要求跳转"，滑行中途被打断。
+     */
+    /**
+     * @constraint 拖动与滑行期间一律不接受外部同步。
+     *      上报是节流的，父组件的 view 会滞后我们几十毫秒；这期间只要父组件
+     *      重渲染一次，就会被误判成"外部要求跳到旧角度"，seek 直接接管，
+     *      拖到一半的位移全被丢掉——手感上就是"甩一下就卡住"。
+     *      滑块/重置只可能在没有指针的时候被操作，不会冲突。
+     */
+    const mode = spin.current.mode
+    if (mode === 'drag' || mode === 'glide') return
+    const gapX = Math.abs(view.rotX - reported.current.x)
+    const gapY = Math.abs(yawGap(view.rotY, reported.current.y))
+    if (gapX < 1e-3 && gapY < 1e-3) return
+    const targetY = nearestYaw(spin.current.ry, view.rotY)
+    const jump = Math.abs(view.rotX - spin.current.rx) + Math.abs(targetY - spin.current.ry)
+    if (jump > 150) snapOrbit(spin.current, view.rotX, targetY)
+    else seekOrbit(spin.current, view.rotX, targetY)
     reported.current = { x: view.rotX, y: view.rotY }
     dirty.current = true
   }, [view?.rotX, view?.rotY, view])
@@ -433,11 +529,17 @@ export function ModelView({
       }
       let faces: Face3D[]
       if (subject.kind === 'entity') {
+        /**
+         * @constraint yaw 必须给实体的真实朝向，不能加一条正弦摆动。
+         *      setupAnim 里的 yaw 是"头与身体的夹角"，喂一个随时间摆的值，
+         *      整只生物会不分场合地左右摇头——看着像抽搐，而不是在走路。
+         *      站立与前进时头身同向，差值就是 0。
+         */
         const poses = subject.poser.pose({
           t: elapsed,
           speed: liveSpeed,
           pitch: 0,
-          yaw: Math.sin(elapsed * 0.7) * 10,
+          yaw: 0,
         })
         faces = entityFaces(subject.rig, poses, subject.texture, subject.layers)
       } else {
@@ -499,14 +601,16 @@ export function ModelView({
       if (cacheKey) rememberThumb(cacheKey, canvas)
     }
 
-    const report = (now: number) => {
-      if (!onViewChange || now - lastReport < 40) return
+    const report = (now: number, force = false) => {
+      if (!onViewChange) return
+      if (!force && now - lastReport < REPORT_INTERVAL) return
       const { rx, ry } = spin.current
       if (Math.abs(rx - reported.current.x) < 0.05 && Math.abs(ry - reported.current.y) < 0.05) return
       lastReport = now
-      reported.current = { x: rx, y: ry }
-      const live = viewLive.current ?? { rotX: rx, rotY: ry, zoom: 1, light: 1, blur: 0, outline: 0 }
-      onViewChange?.({ ...live, rotX: rx, rotY: ry })
+      const yaw = normalizeYaw(ry)
+      reported.current = { x: rx, y: yaw }
+      const live = viewLive.current ?? { rotX: rx, rotY: yaw, zoom: 1, light: 1, blur: 0, outline: 0 }
+      onViewChange({ ...live, rotX: rx, rotY: yaw })
     }
 
     const tick = (now: number) => {
@@ -522,38 +626,15 @@ export function ModelView({
         dirty.current = true
       }
 
-      if (!dragging.current) {
-        // 惯性：松手后按上一帧的速度继续转，慢慢停下
-        if (Math.abs(state.vrx) > INERTIA_STOP || Math.abs(state.vry) > INERTIA_STOP) {
-          state.trx = clamp(state.trx + state.vrx, -85, 85)
-          if (state.trx > -85 && state.trx < 85) state.try += state.vry
-          state.vrx *= INERTIA_DECAY
-          state.vry *= INERTIA_DECAY
-        } else {
-          state.vrx = 0
-          state.vry = 0
-        }
-      }
-
-      /**
-       * 平滑逼近目标角度。
-       * @constraint 时间常数取 40ms：再小就跟不上手（拖动时模型明显落后于指针，
-       *      松手才发现转过头了），再大就会看到"一卡一卡"的量化感。
-       */
-      const ease = 1 - Math.exp(-dt / 0.04)
-      const nx = state.rx + (state.trx - state.rx) * ease
-      const ny = state.ry + (state.try - state.ry) * ease
-      const moved = Math.abs(nx - state.rx) + Math.abs(ny - state.ry)
-      if (moved > 1e-4) {
-        state.rx = nx
-        state.ry = ny
-        dirty.current = true
-      }
+      const beforeRx = state.rx
+      const beforeRy = state.ry
+      if (stepOrbit(state, dt)) dirty.current = true
 
       /**
        * 转动速度（度/秒）折算成 0..1；骨骼动画按运动强度给一个基础量。
        * @why 150°/s 已经是很用力的甩，再快也不该更糊。
        */
+      const moved = Math.abs(state.rx - beforeRx) + Math.abs(state.ry - beforeRy)
       const rate = moved / Math.max(1e-3, dt)
       const anim = animatedLive.current ? Math.min(1, speedLive.current) : 0
       const target = Math.min(1, rate / 90 + anim * 0.7)
@@ -564,7 +645,14 @@ export function ModelView({
         dirty.current = false
         draw()
       }
-      report(now)
+      /**
+       * @constraint 滑行结束必须补报一次，否则父组件里存的是松手前 120ms 的角度，
+       *      滑块停在半路，导出的机位也跟着错。
+       */
+      const settled =
+        !orbitBusy(state) &&
+        (Math.abs(state.rx - reported.current.x) > 0.05 || Math.abs(yawGap(state.ry, reported.current.y)) > 0.05)
+      report(now, settled)
       raf = requestAnimationFrame(tick)
     }
 
@@ -626,71 +714,153 @@ export function ModelView({
     }
   }, [subject, facesOf, blockAnim, textureKey, version, pixels, animated, onViewChange, frame, pivot])
 
+  /** 松手/停止时把最终角度交出去，别让导出面板拿着 120ms 前的值 */
+  const flush = () => {
+    const yaw = normalizeYaw(spin.current.ry)
+    const live = viewLive.current ?? { rotX: spin.current.rx, rotY: yaw, zoom: 1, light: 1, blur: 0, outline: 0 }
+    reported.current = { x: spin.current.rx, y: yaw }
+    onViewChange?.({ ...live, rotX: spin.current.rx, rotY: yaw })
+  }
+
   const onPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
     if (!interactive) return
     event.currentTarget.setPointerCapture(event.pointerId)
-    dragging.current = true
-    spin.current.vrx = 0
-    spin.current.vry = 0
-    pending.current = { x: event.clientX, y: event.clientY }
+    pointers.current.set(event.pointerId, { x: event.clientX, y: event.clientY })
+
+    if (pointers.current.size === 1) {
+      pending.current = { x: event.clientX, y: event.clientY }
+      trail.current = [{ t: event.timeStamp, x: event.clientX, y: event.clientY }]
+      beginDrag(spin.current)
+      return
+    }
+    /**
+     * 第二根手指按下来：立刻退出旋转，改成缩放。
+     * @constraint 必须同时清掉角速度，否则松手后还会带着捏合前的惯性甩出去。
+     */
+    if (pointers.current.size === 2) {
+      const [a, b] = [...pointers.current.values()]
+      if (a && b) pinch.current = { dist: Math.hypot(a.x - b.x, a.y - b.y) || 1, zoom: zoomLocal.current }
+      spin.current.mode = 'idle'
+      spin.current.vrx = 0
+      spin.current.vry = 0
+    }
   }
 
   const onPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
-    if (!interactive || !dragging.current) return
-    // 用 coalesced 事件能拿到被合并掉的中间点，快甩时不再一顿一顿
-    const events = typeof event.nativeEvent.getCoalescedEvents === 'function'
-      ? event.nativeEvent.getCoalescedEvents()
-      : [event.nativeEvent]
+    if (!interactive) return
+    const tracked = pointers.current.get(event.pointerId)
+    if (!tracked) return
+    tracked.x = event.clientX
+    tracked.y = event.clientY
+
+    // 双指：只做缩放，不动角度
+    if (pinch.current && pointers.current.size >= 2) {
+      const [a, b] = [...pointers.current.values()]
+      if (!a || !b) return
+      const dist = Math.hypot(a.x - b.x, a.y - b.y) || 1
+      applyZoom(pinch.current.zoom * (dist / pinch.current.dist))
+      return
+    }
+
+    if (spin.current.mode !== 'drag') return
+    /**
+     * 用 coalesced 事件能拿到被合并掉的中间点：快甩时浏览器每帧只派发一个
+     * pointermove，中间那几十像素全丢了，速度算出来偏小，表现为"甩不动"。
+     */
+    const raw = event.nativeEvent
+    const events = typeof raw.getCoalescedEvents === 'function' ? raw.getCoalescedEvents() : []
+    const points = events.length > 0 ? events : [raw]
+
     const state = spin.current
-    for (const point of events.length > 0 ? events : [event.nativeEvent]) {
+    for (const point of points) {
       const prev = pending.current
       if (!prev) continue
-      const dx = point.clientX - prev.x
-      const dy = point.clientY - prev.y
       pending.current = { x: point.clientX, y: point.clientY }
-      state.trx = clamp(state.trx + dy * PITCH_PER_PX, -85, 85)
-      state.try += dx * YAW_PER_PX
-      // 记录瞬时速度给惯性用（限幅，否则一次瞬移能让它转半分钟）
-      /**
-       * @constraint 惯性系数 0.4 而不是 1：位移会被按 0.9 逐帧衰减，累计大约是
-       *      单帧位移的 10 倍，取满就等于松手后再多转半个屏幕——用户只是想看侧面，
-       *      结果甩到了背面。
-       */
-      state.vrx = clamp(dy * PITCH_PER_PX * 0.4, -5, 5)
-      state.vry = clamp(dx * YAW_PER_PX * 0.4, -7, 7)
+      dragOrbit(state, point.clientX - prev.x, point.clientY - prev.y)
+      trail.current.push({ t: point.timeStamp, x: point.clientX, y: point.clientY })
     }
+    // 只留窗口内的采样点，长按拖动不至于攒出几千个
+    const cutoff = event.timeStamp - GLIDE_WINDOW
+    while (trail.current.length > 2 && trail.current[0]!.t < cutoff) trail.current.shift()
     dirty.current = true
   }
 
   /**
-   * @constraint 滚轮必须用原生监听器加 passive:false：React 的 onWheel 在
-   *      部分浏览器上是 passive 的，preventDefault 会被忽略，缩放时页面跟着滚。
+   * 滚轮缩放。
+   *
+   * @constraint 必须用原生监听器加 passive:false：React 的 onWheel 在部分浏览器上
+   *      是 passive 的，preventDefault 会被忽略，缩放时整页跟着滚。
+   * @constraint 基准值取 zoomLocal 而不是父组件的 zoom：连续滚轮事件在同一帧里
+   *      派发好几次，父组件的 state 还没回流，每次都拿旧值乘，滚十格只放大一档。
    */
   useEffect(() => {
     const element = holderRef.current
     if (!element || !interactive) return
     const onWheel = (event: WheelEvent) => {
       event.preventDefault()
-      const live = viewLive.current ?? { rotX: baseRx, rotY: baseRy, zoom: 1, light: 1, blur: 0, outline: 0 }
-      const step = Math.exp(-event.deltaY * 0.0016)
-      const next = clamp(live.zoom * step, 0.5, 2.6)
-      onViewChange?.({ ...live, zoom: next })
+      // 触控板的双指缩放会带 ctrlKey，步长比滚轮细，给大一档系数才跟手
+      const gain = event.ctrlKey ? 0.006 : 0.0016
+      applyZoom(zoomLocal.current * Math.exp(-event.deltaY * gain))
     }
     element.addEventListener('wheel', onWheel, { passive: false })
     return () => element.removeEventListener('wheel', onWheel)
-  }, [interactive, onViewChange, baseRx, baseRy])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [interactive, baseRx, baseRy])
 
-  /** 松手时立刻把最终角度交给父组件，别让导出面板拿着 40ms 前的值 */
-  const endDrag = (event: React.PointerEvent<HTMLDivElement>) => {
+  const endPointer = (event: React.PointerEvent<HTMLDivElement>) => {
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       event.currentTarget.releasePointerCapture(event.pointerId)
     }
-    if (!dragging.current) return
-    dragging.current = false
-    pending.current = null
-    const live = viewLive.current ?? { rotX: baseRx, rotY: baseRy, zoom: 1, light: 1, blur: 0, outline: 0 }
-    reported.current = { x: spin.current.rx, y: spin.current.ry }
-    onViewChange?.({ ...live, rotX: spin.current.rx, rotY: spin.current.ry })
+    /**
+     * @constraint 只有"确实摘掉了一个还在按着的指针"才算松手。
+     *      浏览器在 pointerup 之后还会补一个 lostpointercapture，两个 handler
+     *      都挂在这里；不挡住第二次，第一次算好的惯性会被第二次的
+     *      "零速度松手"清掉，松手就完全没有余韵。
+     */
+    const had = pointers.current.delete(event.pointerId)
+    if (!had) return
+    pinch.current = null
+
+    if (pointers.current.size === 0) {
+      pending.current = null
+      /**
+       * @constraint 用窗口内的首尾位移算速度，不用"最后一帧的差分"：
+       *      手指松开会先派发一个同位置 move，那一帧位移为 0，直接差分
+       *      等于把速度清零——这正是"甩了没反应"的原因。
+       */
+      const points = trail.current
+      if (points.length >= 2) {
+        const first = points[0]!
+        const last = points[points.length - 1]!
+        const span = Math.max(0.008, (last.t - first.t) / 1000)
+        endDrag(
+          spin.current,
+          ((last.x - first.x) / span) * YAW_PER_PX,
+          ((last.y - first.y) / span) * PITCH_PER_PX,
+        )
+      } else {
+        endDrag(spin.current, 0, 0)
+      }
+      trail.current = []
+      flush()
+      return
+    }
+    /**
+     * @constraint 从两指回到一指时不能沿用旧的锚点：捏合过程中手指位置一直在变，
+     *      用旧锚点会让剩下那根手指一落下就把模型转掉一大截。
+     */
+    const [rest] = [...pointers.current.values()]
+    if (!rest) return
+    pending.current = { x: rest.x, y: rest.y }
+    if (pointers.current.size === 1) beginDrag(spin.current)
+  }
+
+  /** 双击回到默认机位：用户转晕了总得有个出口 */
+  const onDoubleClick = () => {
+    if (!interactive) return
+    snapOrbit(spin.current, baseRx, baseRy)
+    applyZoom(1)
+    dirty.current = true
   }
 
   return (
@@ -700,9 +870,10 @@ export function ModelView({
       style={{ width: size, height: size }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
-      onPointerUp={endDrag}
-      onPointerCancel={endDrag}
-      onLostPointerCapture={endDrag}
+      onPointerUp={endPointer}
+      onPointerCancel={endPointer}
+      onLostPointerCapture={endPointer}
+      onDoubleClick={onDoubleClick}
     >
       <canvas
         ref={canvasRef}

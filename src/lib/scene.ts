@@ -143,13 +143,20 @@ const LIGHT: Vec3 = [0.42, 0.78, -0.46]
  */
 const FACE_LUMA = { up: 1, ns: 0.88, ew: 0.76, down: 0.66 }
 
+/** 轴对齐包围盒（模型单位，y 向上） */
+export interface Bounds {
+  min: Vec3
+  max: Vec3
+}
+
 /**
- * 一组面的包围盒中心（模型单位，y 向上）。
+ * 一组面的轴对齐包围盒。
  *
- * @why 转台枢轴用它。空集合退回方块中心，行为与旧代码一致。
+ * @constraint 必须是旋转无关的三维盒。转台枢轴与取景都从它派生，
+ *      若按某一帧的屏幕包络算，换个角度中心就变了。
  */
-export function pivotOf(faces: Face3D[]): Vec3 {
-  if (faces.length === 0) return [8, 8, 8]
+export function boundsOf(faces: Face3D[]): Bounds | null {
+  if (faces.length === 0) return null
   let minX = Infinity
   let maxX = -Infinity
   let minY = Infinity
@@ -169,7 +176,35 @@ export function pivotOf(faces: Face3D[]): Vec3 {
       if (z > maxZ) maxZ = z
     }
   }
-  return [(minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2]
+  return { min: [minX, minY, minZ], max: [maxX, maxY, maxZ] }
+}
+
+/** 两个包围盒的并集；null 视为空 */
+export function mergeBounds(a: Bounds | null, b: Bounds | null): Bounds | null {
+  if (!a) return b
+  if (!b) return a
+  return {
+    min: [Math.min(a.min[0], b.min[0]), Math.min(a.min[1], b.min[1]), Math.min(a.min[2], b.min[2])],
+    max: [Math.max(a.max[0], b.max[0]), Math.max(a.max[1], b.max[1]), Math.max(a.max[2], b.max[2])],
+  }
+}
+
+export function centerOf(bounds: Bounds): Vec3 {
+  return [
+    (bounds.min[0] + bounds.max[0]) / 2,
+    (bounds.min[1] + bounds.max[1]) / 2,
+    (bounds.min[2] + bounds.max[2]) / 2,
+  ]
+}
+
+/**
+ * 一组面的包围盒中心（模型单位，y 向上）。
+ *
+ * @why 转台枢轴用它。空集合退回方块中心，行为与旧代码一致。
+ */
+export function pivotOf(faces: Face3D[]): Vec3 {
+  const bounds = boundsOf(faces)
+  return bounds ? centerOf(bounds) : [8, 8, 8]
 }
 
 /**
@@ -236,12 +271,16 @@ export function frameFromBox(box: CameraBox): FrameBounds | null {
  *
  * @why 枢轴已经是模型中心，相机中心就该是 0。若还按包围盒中心取，两者差多少，
  *      模型在屏幕上就偏多少——转动时它绕的是枢轴而不是屏幕中心，看起来在画圈。
+ *
+ * @param offset 枢轴自己的相机空间偏移（格）。模型的 display.translation 会把
+ *      整体推开一段，那段位移与旋转无关，中心必须跟着走，否则带位移的方块
+ *      （活板门、旗帜、床）转起来还是绕屏幕外的一个点。
  */
-export function frameAroundPivot(box: CameraBox): FrameBounds | null {
+export function frameAroundPivot(box: CameraBox, offset?: [number, number]): FrameBounds | null {
   if (!Number.isFinite(box.minX) || !Number.isFinite(box.minY)) return null
   return {
-    cx: 0,
-    cy: 0,
+    cx: offset?.[0] ?? 0,
+    cy: offset?.[1] ?? 0,
     span: Math.max(box.maxX - box.minX, box.maxY - box.minY) || 1,
   }
 }

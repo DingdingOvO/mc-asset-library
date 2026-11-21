@@ -279,7 +279,7 @@ export function ModelModal({
             </div>
           )}
 
-          {!empty && <span className="modal__hint">拖动旋转 · 滚轮缩放</span>}
+          {!empty && <span className="modal__hint">拖动旋转 · 滚轮缩放 · 双击复位</span>}
         </div>
 
         <div className="modal__side">
@@ -342,8 +342,8 @@ export function ModelModal({
                   <span>俯仰</span>
                   <input
                     type="range"
-                    min={-89}
-                    max={89}
+                    min={-86}
+                    max={86}
                     step={1}
                     value={Math.round(view.rotX)}
                     onChange={(event) => setView({ ...view, rotX: Number(event.target.value) })}

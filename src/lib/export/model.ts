@@ -10,7 +10,7 @@
  *      逐帧渲染保证每一帧的动画时间戳精确等于 i / fps。
  */
 import type { Box, DisplayTransform, Face3D, FrameBounds } from '../scene'
-import { drawScene, emptyCameraBox, frameFromBox, measureFaces, pixelScale } from '../scene'
+import { drawScene, emptyCameraBox, frameAroundPivot, measureFaces, pixelScale } from '../scene'
 import {
   asSeparateGltf,
   boundsOf,
@@ -127,7 +127,14 @@ function planFrames(subject: ModelSubject): Plan | null {
       cam,
     )
   }
-  const frame = frameFromBox(cam)
+  /**
+   * @constraint 取景必须和屏幕预览同一套规则（枢轴居中 + display 位移补偿）。
+   *      预览用 frameAroundPivot、导出用 frameFromBox 的话，非对称模型
+   *      （楼梯、门、带位移的方块）在导出的视频里会偏几十像素——用户按
+   *      "所见即所得"调好机位，出来却是另一个构图。
+   */
+  const shift = subject.display?.translation
+  const frame = frameAroundPivot(cam, shift ? [shift[0]! / 16, shift[1]! / 16] : undefined)
   if (!frame) return null
   const k = pixelScale(subject.size, subject.fit, frame.span)
   const half = subject.size / 2
