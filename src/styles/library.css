@@ -379,13 +379,21 @@
   filter: drop-shadow(0 4px 12px rgb(0 0 0 / 20%));
 }
 
+/**
+ * @why 画布铺满整块棋盘格后，说明文字是叠在模型上的。放大看细节时模型
+ *      全是深色木板/石头，灰字直接读不出来，所以垫一层半透明底。
+ */
 .modal__hint {
   position: absolute;
   left: 12px;
   bottom: 10px;
+  padding: 2px 7px;
+  border-radius: var(--radius-sm);
+  background: color-mix(in srgb, var(--surface) 74%, transparent);
   color: var(--text-muted);
   font-size: 11.5px;
   pointer-events: none;
+  backdrop-filter: blur(4px);
 }
 
 .modal__side {
@@ -824,6 +832,12 @@
   image-rendering: pixelated;
 }
 
+/* @why 详情页的棋盘格是矩形：画布必须覆盖整块，否则中间那块方形就是裁剪边 */
+.thumb--fill {
+  position: absolute;
+  inset: 0;
+}
+
 .thumb--interactive {
   cursor: grab;
   touch-action: none;
@@ -1081,9 +1095,15 @@
   position: absolute;
   left: 12px;
   bottom: 32px;
+  /* 画布铺满整块后是绝对定位，控件必须抬到它上面 */
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 5px;
+  padding: 3px 6px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 66%, transparent);
+  backdrop-filter: blur(6px);
 }
 
 .modal__kind {

@@ -97,7 +97,16 @@ export interface ViewState {
 interface ModelViewProps {
   subject: Subject
   version: string
+  /** 画布 CSS 宽度 */
   size: number
+  /**
+   * 画布 CSS 高度，不传等于 size（正方形）。
+   * @why 详情页的棋盘格是矩形。画布固定成正方形时只能在中间占一块方的，
+   *      放大后模型被方形边缘硬切，边界一目了然——用户看到的就是"一个裁剪框"。
+   */
+  height?: number
+  /** 铺满父容器（绝对定位），用于棋盘格已经铺满的详情页 */
+  fill?: boolean
   interactive?: boolean
   /** 播放动作（仅实体有效） */
   animated?: boolean
@@ -203,6 +212,8 @@ export function ModelView({
   subject,
   version,
   size,
+  height,
+  fill = false,
   interactive = false,
   animated = false,
   speed = 1,
@@ -301,7 +312,21 @@ export function ModelView({
    *      2.5 倍在 320px 画布上相当于 800px 物理像素，肉眼已经看不出与 3 倍的区别。
    */
   const dpr = useDpr(interactive ? 2.5 : DPR_MAX)
-  const pixels = Math.round(size * dpr * (interactive ? 1.05 : 1))
+  const cssH = height ?? size
+  const grow = interactive ? 1.05 : 1
+  const rawW = size * dpr * grow
+  const rawH = cssH * dpr * grow
+  /**
+   * 像素预算。
+   *
+   * @constraint 详情页的画布铺满整块棋盘格之后，像素量按面积涨：430×850 的
+   *      面板在 DPR 3 下是 360 万像素，软件光栅化一帧要几百毫秒。
+   *      超过预算就等比降分辨率——宁可略软，也不能拖动变幻灯片。
+   */
+  const budget = interactive ? 2_600_000 : 800_000
+  const shrink = Math.min(1, Math.sqrt(budget / (rawW * rawH)))
+  const pixels = Math.max(1, Math.round(rawW * shrink))
+  const pixelsH = Math.max(1, Math.round(rawH * shrink))
 
   /**
    * 缩略图的超采样倍数。
@@ -564,12 +589,12 @@ export function ModelView({
        */
       const cacheKey = interactive || blockAnim || animatedLive.current
         ? null
-        : `t|${geometryKey}|${textureKey}|${pixels}|${Math.round(spin.current.rx)}|${Math.round(spin.current.ry)}|${Math.round((live?.light ?? 1) * 100)}|${Math.round((live?.zoom ?? 1) * 100)}`
+        : `t|${geometryKey}|${textureKey}|${pixels}x${pixelsH}|${Math.round(spin.current.rx)}|${Math.round(spin.current.ry)}|${Math.round((live?.light ?? 1) * 100)}|${Math.round((live?.zoom ?? 1) * 100)}`
       if (cacheKey) {
         const hit = thumbCache.get(cacheKey)
         if (hit) {
           ctx.setTransform(1, 0, 0, 1, 0, 0)
-          ctx.clearRect(0, 0, pixels, pixels)
+          ctx.clearRect(0, 0, pixels, pixelsH)
           ctx.drawImage(hit, 0, 0)
           return
         }
@@ -621,6 +646,7 @@ export function ModelView({
       drawScene(ctx, {
         faces,
         size: pixels,
+        height: pixelsH,
         rotX: spin.current.rx,
         rotY: spin.current.ry,
         fit: subject.kind === 'entity' ? 'auto' : 'block',
@@ -763,7 +789,7 @@ export function ModelView({
       observer?.disconnect()
       stopTicks?.()
     }
-  }, [subject, facesOf, blockAnim, textureKey, version, pixels, restSupersample, interactive, animated, onViewChange, frame, pivot])
+  }, [subject, facesOf, blockAnim, textureKey, version, pixels, pixelsH, restSupersample, interactive, animated, onViewChange, frame, pivot])
 
   /** 松手/停止时把最终角度交出去，别让导出面板拿着节流窗口内的旧值 */
   const flush = () => {
@@ -917,8 +943,8 @@ export function ModelView({
   return (
     <div
       ref={holderRef}
-      className={`thumb${interactive ? ' thumb--interactive' : ''}${className ? ` ${className}` : ''}`}
-      style={{ width: size, height: size }}
+      className={`thumb${fill ? ' thumb--fill' : ''}${interactive ? ' thumb--interactive' : ''}${className ? ` ${className}` : ''}`}
+      style={fill ? undefined : { width: size, height: cssH }}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={endPointer}
@@ -930,8 +956,8 @@ export function ModelView({
         ref={canvasRef}
         className="thumb__canvas"
         width={pixels}
-        height={pixels}
-        style={{ width: size, height: size }}
+        height={pixelsH}
+        style={fill ? { width: '100%', height: '100%' } : { width: size, height: cssH }}
       />
     </div>
   )

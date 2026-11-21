@@ -33,8 +33,14 @@ import { loadTexel } from '@/lib/texel'
 import { textureSrc } from '@/lib/mc'
 
 export interface ModelCamera {
-  /** 画布边长（物理像素） */
+  /** 画布宽度（物理像素） */
   size: number
+  /**
+   * 画布高度（物理像素），不传等于 size。
+   * @constraint 正交框必须按宽高分开算：视口是矩形时若仍用 size 当半高，
+   *      模型会被拉伸——方块变成扁的，圆形贴图（史莱姆脸）变成椭圆。
+   */
+  height?: number
   /** 俯仰角（度） */
   rotX: number
   /** 水平角（度） */
@@ -160,8 +166,10 @@ export class ModelPipeline {
     const entry = this.meshFor(key, faces, version, shading)
     const { ctx } = this
     const gl = ctx.gl
+    const w = Math.max(1, Math.round(camera.size))
+    const h = Math.max(1, Math.round(camera.height ?? camera.size))
 
-    ctx.resize(camera.size, camera.size)
+    ctx.resize(w, h)
     this.renderer.begin([0, 0, 0, 0])
 
     const { view, proj, frame } = this.frameFor(camera)
@@ -190,7 +198,7 @@ export class ModelPipeline {
       })
     })
 
-    gl.viewport(0, 0, camera.size, camera.size)
+    gl.viewport(0, 0, w, h)
     this.renderer.draw(calls, { ...frame, modelViewMat: view, projMat: proj })
 
     if (typeof window !== 'undefined' && (window as unknown as { __mcDebugMesh?: boolean }).__mcDebugMesh) {
@@ -206,7 +214,7 @@ export class ModelPipeline {
       }
     }
 
-    ctx.blitTo(target, camera.size, camera.size)
+    ctx.blitTo(target, w, h)
     return entry.stats
   }
 
@@ -227,7 +235,9 @@ export class ModelPipeline {
     const { ctx } = this
     const gl = ctx.gl
 
-    ctx.resize(camera.size, camera.size)
+    const w = Math.max(1, Math.round(camera.size))
+    const h = Math.max(1, Math.round(camera.height ?? camera.size))
+    ctx.resize(w, h)
     this.renderer.begin([0, 0, 0, 0])
     const { view, proj, frame } = this.frameFor(camera)
 
@@ -255,9 +265,9 @@ export class ModelPipeline {
       })
     })
 
-    gl.viewport(0, 0, camera.size, camera.size)
+    gl.viewport(0, 0, w, h)
     this.renderer.draw(calls, { ...frame, modelViewMat: view, projMat: proj })
-    ctx.blitTo(target, camera.size, camera.size)
+    ctx.blitTo(target, w, h)
     return entry.stats
   }
 
@@ -366,11 +376,15 @@ export class ModelPipeline {
 
     // 取景：与 CPU 侧 `pixelScale` 共用同一个占比常量
     const fraction = fitFraction(camera.fit)
-    const viewSize = span / (camera.size * fraction * zoom) // 一个像素对应多少世界单位
-    const half = (camera.size * viewSize) / 2
+    const w = Math.max(1, Math.round(camera.size))
+    const h = Math.max(1, Math.round(camera.height ?? camera.size))
+    // 短边定比例，与 CPU 侧 pixelScale(short) 同口径：换后端模型大小不跳
+    const viewSize = span / (Math.min(w, h) * fraction * zoom) // 一个像素对应多少世界单位
+    const halfW = (w * viewSize) / 2
+    const halfH = (h * viewSize) / 2
 
     const view = multiply(translateMatrix(-cx, -cy, 0), model)
-    const proj = ortho(-half, half, -half, half, -2000, 2000)
+    const proj = ortho(-halfW, halfW, -halfH, halfH, -2000, 2000)
 
     return {
       view,

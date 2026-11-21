@@ -107,23 +107,31 @@ export function ModelModal({
   const baseRot = flat ? FLAT_ROTATION : isEntity ? ENTITY_ROTATION : DEFAULT_ROTATION
 
   /**
-   * 预览画布的实际边长。
+   * 预览画布的实际尺寸，铺满整块棋盘格。
    *
-   * @why 以前写死 320：手机上模型区只有 36vh（约 300px）高，画布比容器还大，
-   *      岩浆/水这种铺满画面的方块会直接溢出到左下角的说明文字上。
-   *      按容器短边算，模型永远完整落在棋盘格里。
-   * @constraint 留 24px 内边距，否则描边和阴影会被裁掉一圈。
+   * @why 以前是「取容器短边减 24，画一个正方形」：棋盘格是矩形，画布是正方，
+   *      中间那块方形区域的边界就是硬裁剪边——放大看细节时模型在方框里被切断，
+   *      框外还露着一圈棋盘格，看起来像被裁进一张纸里。
+   * @constraint 取容器的宽高而不是短边：裁剪边必须落在棋盘格的边上。
+   *      取景按短边算（渲染内核统一口径），所以模型不会被拉变形。
    */
   const viewBoxRef = useRef<HTMLDivElement>(null)
-  const [viewSize, setViewSize] = useState(320)
+  const [viewSize, setViewSize] = useState({ w: 320, h: 320 })
 
   useEffect(() => {
     const node = viewBoxRef.current
     if (!node) return
     const measure = () => {
-      const box = node.getBoundingClientRect()
-      if (box.width < 1 || box.height < 1) return
-      setViewSize(Math.max(96, Math.min(320, Math.floor(Math.min(box.width, box.height) - 24))))
+      /**
+       * @constraint 必须用 clientWidth/clientHeight，不能用 getBoundingClientRect：
+       *      后者把 CSS transform 一起量进去。弹窗入场/退场是 scale 动画，
+       *      每帧量到的尺寸都不一样，画布会跟着每帧重建一次——又费又抖。
+       */
+      const w = node.clientWidth
+      const h = node.clientHeight
+      if (w < 1 || h < 1) return
+      const next = { w: Math.max(120, w), h: Math.max(120, h) }
+      setViewSize((prev) => (prev.w === next.w && prev.h === next.h ? prev : next))
     }
     measure()
     const observer = new ResizeObserver(measure)
@@ -266,7 +274,9 @@ export function ModelModal({
             <ModelView
               subject={subject}
               version={version}
-              size={viewSize}
+              size={viewSize.w}
+              height={viewSize.h}
+              fill
               interactive
               animated
               speed={speed}

@@ -76,8 +76,16 @@ export interface FrameBounds {
 }
 
 export interface ProjectOptions {
-  /** 画布边长（物理像素） */
+  /** 画布宽度（物理像素） */
   size: number
+  /**
+   * 画布高度（物理像素），不传等于 size。
+   * @why 详情页的棋盘格是矩形，画布若固定成正方形只能在中间摆一块方的：
+   *      放大后模型被方形边缘硬切，看起来是一个"裁剪框"，框外还露着棋盘格。
+   * @constraint 取景一律按短边（见 pixelScale 调用），宽高只决定可见范围。
+   *      两条渲染路径必须同口径，否则换后端时模型大小会跳。
+   */
+  height?: number
   rotX: number
   rotY: number
   /**
@@ -320,6 +328,9 @@ export interface ProjectResult {
 
 export function projectFaces(faces: Face3D[], options: ProjectOptions): ProjectResult {
   const { size, rotX, rotY, display, version } = options
+  const width = Math.max(1, Math.round(size))
+  const height = Math.max(1, Math.round(options.height ?? size))
+  const short = Math.min(width, height)
   const fit = options.fit ?? 'block'
   const zoom = options.zoom ?? 1
   // @constraint 上限压到 1.45：再往上调，白色方块会整片过曝成纯白，纹理全糊
@@ -359,14 +370,14 @@ export function projectFaces(faces: Face3D[], options: ProjectOptions): ProjectR
     return {
       raster: [],
       box: { x0: 0, y0: 0, x1: 0, y1: 0 },
-      camera: { centerX: 0, centerY: 0, span: 1, k: pixelScale(size, fit, 1, zoom) },
+      camera: { centerX: 0, centerY: 0, span: 1, k: pixelScale(short, fit, 1, zoom) },
     }
   }
 
   const centerX = options.frame ? options.frame.cx : (minX + maxX) / 2
   const centerY = options.frame ? options.frame.cy : (minY + maxY) / 2
   const span = options.frame ? options.frame.span : Math.max(maxX - minX, maxY - minY) || 1
-  const k = pixelScale(size, fit, span, zoom)
+  const k = pixelScale(short, fit, span, zoom)
 
   const raster: RasterFace[] = []
   let boxX0 = Infinity
@@ -404,8 +415,8 @@ export function projectFaces(faces: Face3D[], options: ProjectOptions): ProjectR
     const bias = face.bias ?? 0
     for (let i = 0; i < 4; i += 1) {
       const p = pts[i]!
-      const x = size / 2 + (p[0]! - centerX) * k
-      const y = size / 2 - (p[1]! - centerY) * k
+      const x = width / 2 + (p[0]! - centerX) * k
+      const y = height / 2 - (p[1]! - centerY) * k
       if (x < boxX0) boxX0 = x
       if (x > boxX1) boxX1 = x
       if (y < boxY0) boxY0 = y
@@ -429,14 +440,14 @@ let outlineCanvas: HTMLCanvasElement | null = null
 let trailCanvas: HTMLCanvasElement | null = null
 
 
-function getLayer(size: number): CanvasRenderingContext2D | null {
+function getLayer(width: number, height: number): CanvasRenderingContext2D | null {
   if (!layerCanvas) layerCanvas = document.createElement('canvas')
-  if (layerCanvas.width !== size || layerCanvas.height !== size) {
-    layerCanvas.width = size
-    layerCanvas.height = size
+  if (layerCanvas.width !== width || layerCanvas.height !== height) {
+    layerCanvas.width = width
+    layerCanvas.height = height
   }
   const ctx = layerCanvas.getContext('2d')
-  if (ctx) ctx.clearRect(0, 0, size, size)
+  if (ctx) ctx.clearRect(0, 0, width, height)
   return ctx
 }
 
@@ -449,7 +460,8 @@ function getLayer(size: number): CanvasRenderingContext2D | null {
  */
 function getAux(
   slot: 'outline' | 'trail',
-  size: number,
+  width: number,
+  height: number,
 ): { canvas: HTMLCanvasElement; ctx: CanvasRenderingContext2D } | null {
   let canvas = slot === 'outline' ? outlineCanvas : trailCanvas
   if (!canvas) {
@@ -457,9 +469,9 @@ function getAux(
     if (slot === 'outline') outlineCanvas = canvas
     else trailCanvas = canvas
   }
-  if (canvas.width !== size || canvas.height !== size) {
-    canvas.width = size
-    canvas.height = size
+  if (canvas.width !== width || canvas.height !== height) {
+    canvas.width = width
+    canvas.height = height
   }
   const ctx = canvas.getContext('2d')
   if (!ctx) return null
@@ -487,21 +499,22 @@ function getAux(
  */
 function paintOutline(
   ctx: CanvasRenderingContext2D,
-  size: number,
+  width: number,
+  height: number,
   layer: HTMLCanvasElement,
   strength: number,
   color: string,
 ): void {
-  const aux = getAux('outline', size)
+  const aux = getAux('outline', width, height)
   if (!aux) return
   const { canvas, ctx: octx } = aux
-  octx.clearRect(0, 0, size, size)
+  octx.clearRect(0, 0, width, height)
 
   /**
    * @constraint 线宽按画布尺寸等比放大：336 是设计基准，672 的导出画布上
    *      2px 的线会细得看不见。上限压住 7px，再粗就不像描边而像贴纸边框。
    */
-  const radius = (1.4 + strength * 3.6) * (size / 336)
+  const radius = (1.4 + strength * 3.6) * (Math.min(width, height) / 336)
   // 两圈采样：外圈决定线的外沿，内圈（0.6r）把八边形补成圆环
   for (const scale of [1, 0.6]) {
     const r = radius * scale
@@ -516,7 +529,7 @@ function paintOutline(
   octx.drawImage(layer, 0, 0)
   octx.globalCompositeOperation = 'source-in'
   octx.fillStyle = color
-  octx.fillRect(0, 0, size, size)
+  octx.fillRect(0, 0, width, height)
   octx.globalCompositeOperation = 'source-over'
 
   ctx.drawImage(canvas, 0, 0)
@@ -557,18 +570,19 @@ export function resetOutlineColor(): void {
  */
 function paintMotionBlur(
   ctx: CanvasRenderingContext2D,
-  size: number,
+  width: number,
+  height: number,
   layer: HTMLCanvasElement,
   strength: number,
   reset: boolean,
 ): void {
-  const aux = getAux('trail', size)
+  const aux = getAux('trail', width, height)
   if (!aux) {
     ctx.drawImage(layer, 0, 0)
     return
   }
   const { canvas, ctx: tctx } = aux
-  if (reset) tctx.clearRect(0, 0, size, size)
+  if (reset) tctx.clearRect(0, 0, width, height)
 
   /**
    * @constraint 保留比例不能太高：模型多为深色，残影的 alpha 一降就会透出
@@ -577,7 +591,7 @@ function paintMotionBlur(
   const keep = 0.2 + strength * 0.55
   tctx.globalCompositeOperation = 'destination-out'
   tctx.globalAlpha = 1 - keep
-  tctx.fillRect(0, 0, size, size)
+  tctx.fillRect(0, 0, width, height)
 
   tctx.globalCompositeOperation = 'source-over'
   tctx.globalAlpha = 1
@@ -681,6 +695,7 @@ function paintGpu(
       faces as ModelFace[],
       {
         size: options.size,
+        height: options.height,
         rotX: options.rotX,
         rotY: options.rotY,
         pivot: options.pivot ?? [8, 8, 8],
@@ -725,14 +740,17 @@ function warnOnce(error: unknown): void {
  */
 export function drawScene(ctx: CanvasRenderingContext2D, options: SceneOptions): Box {
   const { size, faces } = options
-  if (options.clear !== false) ctx.clearRect(0, 0, size, size)
+  const width = Math.max(1, Math.round(size))
+  const height = Math.max(1, Math.round(options.height ?? size))
+  const short = Math.min(width, height)
+  if (options.clear !== false) ctx.clearRect(0, 0, width, height)
   if (faces.length === 0) return { x0: 0, y0: 0, x1: 0, y1: 0 }
 
   const { raster, box, camera } = projectFaces(faces, options)
-  const layer = getLayer(size)
+  const layer = getLayer(width, height)
 
   if (!layer) {
-    rasterize(ctx, size, size, raster, options.supersample ?? 2)
+    rasterize(ctx, width, height, raster, options.supersample ?? 2)
     return box
   }
 
@@ -742,12 +760,12 @@ export function drawScene(ctx: CanvasRenderingContext2D, options: SceneOptions):
    *      预载由调用方负责（`preloadTextures`），这里只做就绪判定。
    */
   if (!paintGpu(layer, faces, options, camera)) {
-    rasterize(layer, size, size, raster, options.supersample ?? 2)
+    rasterize(layer, width, height, raster, options.supersample ?? 2)
   }
 
   const strength = options.shadow ?? 1
   const shadowBox = options.shadowBox ?? box
-  if (strength > 0 && Number.isFinite(shadowBox.x1)) drawShadow(ctx, size, shadowBox, strength)
+  if (strength > 0 && Number.isFinite(shadowBox.x1)) drawShadow(ctx, short, shadowBox, strength)
 
   /**
    * 顺序：阴影 → 描边 → 模型（或带拖尾的模型）。
@@ -755,10 +773,12 @@ export function drawScene(ctx: CanvasRenderingContext2D, options: SceneOptions):
    *      内部的半透明边缘也会被染黑。
    */
   const outline = options.outline ?? 0
-  if (outline > 0) paintOutline(ctx, size, layerCanvas!, outline, options.outlineColor ?? outlineColor())
+  if (outline > 0) {
+    paintOutline(ctx, width, height, layerCanvas!, outline, options.outlineColor ?? outlineColor())
+  }
 
   const blur = options.motionBlur ?? 0
-  if (blur > 0) paintMotionBlur(ctx, size, layerCanvas!, blur, options.resetTrail === true)
+  if (blur > 0) paintMotionBlur(ctx, width, height, layerCanvas!, blur, options.resetTrail === true)
   else ctx.drawImage(layerCanvas!, 0, 0)
   return box
 }
