@@ -3083,7 +3083,7 @@ button:disabled,
    *      铺满的话，宽屏上会长到 1100+ 像素高，把状态行和滚动条一起推出视口。
    *      视口矮时按 100vh 退回，宽屏时停在 900 不再变大。
    */
-  max-width: min(100%, calc(100vh - 260px), 900px);
+  max-width: min(100%, calc(100dvh - 360px), 900px);
   height: auto;
   aspect-ratio: 1 / 1;
   cursor: grab;
@@ -3101,16 +3101,25 @@ button:disabled,
   color: var(--text-muted);
 }
 
-/* 导出条：横排，窄屏自动换行 */
+/**
+ * 导出条：横排，窄屏自动换行。
+ * @constraint 必须 sticky：画布是正方形且按视口高度取上限，900 高的窗口里
+ *      状态行和导出按钮会正好被挤到折线以下——用户根本发现不了有导出。
+ */
 .struct__export {
+  position: sticky;
+  bottom: 0;
   display: flex;
   flex-wrap: wrap;
   align-items: center;
   gap: 6px;
   width: 100%;
   max-width: 560px;
-  padding-top: 8px;
+  padding: 8px 0 6px;
   border-top: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 92%, transparent);
+  backdrop-filter: blur(6px);
+  z-index: 1;
 }
 
 .struct__export-label {
