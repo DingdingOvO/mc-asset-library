@@ -494,6 +494,31 @@
   }
 }
 
+/**
+ * 退场：比入场快一档。
+ * @why 入场慢是把信息推到用户面前，退场慢只是挡住他要看的下一屏。
+ */
+@keyframes modal-fade-out {
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes modal-sink {
+  to {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+}
+
+.modal-backdrop.is-closing {
+  animation: modal-fade-out 0.17s ease forwards;
+}
+
+.modal-backdrop.is-closing .modal {
+  animation: modal-sink 0.17s ease forwards;
+}
+
 @media (max-width: 760px) {
   .modal {
     grid-template-columns: 1fr;

@@ -62,6 +62,22 @@ export function ModelModal({
   const [speed, setSpeed] = useState(1)
 
   /**
+   * 关闭动画：先播 170ms 的退场，再让父组件卸载。
+   * @why 直接调用 onClose 会让整块弹窗在同一帧消失，前面的入场动画就白做了——
+   *      用户感知到的是"开的时候有动画、关的时候硬切"。
+   * @constraint 延迟必须小于动画时长的一半才不会显得拖沓；170ms 是入场
+   *      （0.26s）的三分之二，退场比入场快一档，符合"确认过要关"的心理预期。
+   * @constraint 必须防重入：蒙层点击与关闭按钮可能在同一帧各触发一次，
+   *      不挡住就会 setTimeout 两次、onClose 两次。
+   */
+  const [closing, setClosing] = useState(false)
+  const requestClose = useCallback(() => {
+    if (closing) return
+    setClosing(true)
+    window.setTimeout(onClose, 170)
+  }, [closing, onClose])
+
+  /**
    * 动作分类：这只生物到底在走、在飞、在游，还是在划桨。
    * @why 档位不能一律给「站立 / 走动 / 行走 / 奔跑」——船没有腿，鱿鱼也不跑。
    */
@@ -80,6 +96,11 @@ export function ModelModal({
   useEffect(() => {
     setSpeed(motion.initial)
   }, [motion.initial, subject])
+
+  // 同一弹窗里换了对象（列表里连点两张卡片）要把退场标记清掉，否则新内容带着淡出动画出现
+  useEffect(() => {
+    setClosing(false)
+  }, [subject])
 
   const flat = subject?.kind === 'block' && Boolean(subject.flat)
   const isEntity = subject?.kind === 'entity'
@@ -222,7 +243,11 @@ export function ModelModal({
    *      压不过它，只有脱离这棵子树才行。
    */
   return createPortal(
-    <div className="modal-backdrop" onClick={onClose} role="presentation">
+    <div
+      className={`modal-backdrop${closing ? ' is-closing' : ''}`}
+      onClick={requestClose}
+      role="presentation"
+    >
       <div
         className="modal modal--block"
         role="dialog"
@@ -230,7 +255,7 @@ export function ModelModal({
         aria-label={title}
         onClick={(event) => event.stopPropagation()}
       >
-        <button type="button" className="modal__close" onClick={onClose} aria-label="关闭">
+        <button type="button" className="modal__close" onClick={requestClose} aria-label="关闭">
           <CloseIcon />
         </button>
 
