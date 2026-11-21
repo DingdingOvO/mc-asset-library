@@ -134,12 +134,12 @@ export function groupsFromFaces(
   return [...byTex.values()]
 }
 
-/** 实体部件：顶点在部件局部坐标（y 向下），翻成 y 向上后缩放 */
-function groupsFromPart(part: RigPart, tex: string): GeoGroup[] {
+/** 实体部件：顶点在部件局部坐标，按渲染器的翻转约定换算成 y 向上 */
+function groupsFromPart(part: RigPart, tex: string, flip: boolean): GeoGroup[] {
   const group: GeoGroup = { tex, positions: [], normals: [], uvs: [], indices: [] }
   const local = (i: number): number[] => [
     (part.verts[i * 3] ?? 0) * UNIT,
-    -(part.verts[i * 3 + 1] ?? 0) * UNIT,
+    (flip ? -1 : 1) * (part.verts[i * 3 + 1] ?? 0) * UNIT,
     (part.verts[i * 3 + 2] ?? 0) * UNIT,
   ]
   for (const face of part.faces) {
@@ -171,6 +171,11 @@ export function nodesFromRig(
   texture: string,
   poses?: Map<string, PartPose> | null,
 ): GltfNode[] {
+  /**
+   * @constraint 翻转开关跟着骨架走。导出和预览必须是同一套坐标约定，
+   *      否则末地水晶在页面里正着、导出的 GLB 里倒着。
+   */
+  const flip = rig.flipY
   /** 与 rigFaces 的可见性判定保持一致：父部件藏了，子部件也一起藏 */
   const visible = (part: RigPart, depth: number, seen: Set<number>): boolean => {
     if (depth > 16 || seen.has(part.index)) return true
@@ -189,7 +194,7 @@ export function nodesFromRig(
       parent: part.parentIndex >= 0 ? part.parentIndex : null,
       translation: [
         (pose?.x ?? part.pivot[0]) * UNIT,
-        -(pose?.y ?? part.pivot[1]) * UNIT,
+        (flip ? -1 : 1) * (pose?.y ?? part.pivot[1]) * UNIT,
         (pose?.z ?? part.pivot[2]) * UNIT,
       ],
       rotation: pose
@@ -197,7 +202,7 @@ export function nodesFromRig(
         : nodeQuat(part.rot[0], part.rot[1], part.rot[2]),
       // @constraint 不可见的部件不写几何，而不是留一堆藏在别的部件里的面：
       //              GLB 没有可见性通道，导出的静态模型会被这些面"穿"出来
-      groups: visible(part, 0, new Set()) ? groupsFromPart(part, texture) : [],
+      groups: visible(part, 0, new Set()) ? groupsFromPart(part, texture, flip) : [],
     }
   })
 }
@@ -252,7 +257,7 @@ export function sampleAnimation(
       track.rotation!.set(rot, i * 4)
 
       const px = (pose0?.x ?? part.pivot[0]) * UNIT
-      const py = -(pose0?.y ?? part.pivot[1]) * UNIT
+      const py = (rig.flipY ? -1 : 1) * (pose0?.y ?? part.pivot[1]) * UNIT
       const pz = (pose0?.z ?? part.pivot[2]) * UNIT
       track.translation!.set([px, py, pz], i * 3)
 

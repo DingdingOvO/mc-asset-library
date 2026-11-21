@@ -9,7 +9,7 @@
  * @constraint 用 new Function 而不是 eval：编译一次、缓存起来，
  *      每帧只是调用一个普通函数，不产生解析开销。
  */
-import type { PartPose, Rig } from './entityRig'
+import type { PartPose, Quat, Rig } from './entityRig'
 import { initialPose } from './entityRig'
 import { flapSample, squishSample, tentacleSample, walkCycle, walkSample } from './entityState'
 import { applyKeyframes, type KeyDefinitions } from './keyframe'
@@ -152,6 +152,46 @@ const MC_IMPL = {
     return diff
   },
   inverseLerp: (a: number, b: number, v: number) => (v - a) / (b - a || 1),
+  /** JOML Quaternionf.setAngleAxis：绕任意轴转 angle 弧度 */
+  qAxis: quatAxis,
+  /** JOML Quaternionf.rotateY：绕 Y 轴，参数是弧度 */
+  qY: (angle: number) => quatAxis(angle, 0, 1, 0),
+  /** Axis.YP.rotationDegrees：绕 Y 轴，参数是度 */
+  qYDeg: (deg: number) => quatAxis((deg * Math.PI) / 180, 0, 1, 0),
+  /** JOML Quaternionf.mul / rotateAxis：右乘组合，a 为空时当单位四元数 */
+  qmul: quatMul,
+}
+
+/**
+ * 四元数工具：只在 `rotateBy` 一族动作里用得到。
+ *
+ * @why 单独抽出来是因为 MC_IMPL 里的函数都在同一个对象字面量中，
+ *      互相引用会因为求值顺序拿到 undefined。
+ */
+function quatAxis(angle: number, x: number, y: number, z: number): Quat {
+  const len = Math.hypot(x, y, z)
+  if (len < 1e-9) return [0, 0, 0, 1]
+  const s = Math.sin(angle / 2) / len
+  return [x * s, y * s, z * s, Math.cos(angle / 2)]
+}
+
+/**
+ * out = a · b（先 b 后 a）。
+ *
+ * @constraint 参数可能为 null：`p.cube.q` 第一帧还没有值，
+ *      把 null 当 0 四元数会把整颗模型压成一个点。
+ */
+function quatMul(a: Quat | null | undefined, b: Quat | null | undefined): Quat {
+  if (!a) return b ?? [0, 0, 0, 1]
+  if (!b) return a
+  const [ax, ay, az, aw] = a
+  const [bx, by, bz, bw] = b
+  return [
+    aw * bx + ax * bw + ay * bz - az * by,
+    aw * by - ax * bz + ay * bw + az * bx,
+    aw * bz + ax * by - ay * bx + az * bw,
+    aw * bw - ax * bx - ay * by - az * bz,
+  ]
 }
 
 const MC = new Proxy(MC_IMPL as Record<string, unknown>, {
@@ -564,6 +604,9 @@ export function createPoser(modelClass: string | null, rig: Rig, anim: AnimFile 
         pose.yScale = base.yScale
         pose.zScale = base.zScale
         pose.visible = true
+        // @constraint 四元数每帧从初值重来。动作代码里是 `q = qmul(q, ...)` 累积式，
+        //      不清空会一帧一帧往上叠，水晶越转越快直到糊成一团。
+        pose.q = base.q ?? null
       }
 
       if (runner) {
@@ -636,7 +679,7 @@ export function createPoser(modelClass: string | null, rig: Rig, anim: AnimFile 
 }
 
 function createDummy(): PartPose {
-  return { xRot: 0, yRot: 0, zRot: 0, x: 0, y: 0, z: 0, xScale: 1, yScale: 1, zScale: 1, visible: true }
+  return { xRot: 0, yRot: 0, zRot: 0, x: 0, y: 0, z: 0, xScale: 1, yScale: 1, zScale: 1, visible: true, q: null }
 }
 
 /** 可下标、可继续点下去的哑部件：p.neckParts[0].xRot = 1 不会炸 */

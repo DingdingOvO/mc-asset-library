@@ -134,9 +134,32 @@ def renderer_src(cls):
     return strip_comments(read(path)) if path else ''
 
 
+def _skip_generics(text, i):
+    """从 text[i] == '<' 起跳过配平的尖括号（泛型可以嵌套）"""
+    depth = 0
+    while i < len(text):
+        if text[i] == '<':
+            depth += 1
+        elif text[i] == '>':
+            depth -= 1
+            if depth == 0:
+                return i + 1
+        i += 1
+    return i
+
+
 def renderer_extends(cls):
     src = renderer_src(cls)
-    m = re.search(r'class\s+%s(?:<[^>]*>)?\s+extends\s+([\w.]+)' % re.escape(cls), src)
+    head = re.search(r'class\s+%s\b' % re.escape(cls), src)
+    if not head:
+        return None
+    # @constraint 必须先配平跳过泛型再找 extends：泛型上界里也有 extends
+    #      （AbstractZombieRenderer<T extends Zombie, …>），直接正则会认成 "父类 = Zombie"，
+    #      继承链断在这里，翻转标记和几何继承一起丢。
+    i = head.end()
+    if i < len(src) and src[i] == '<':
+        i = _skip_generics(src, i)
+    m = re.search(r'\bextends\s+([\w.]+)', src[i:i + 400])
     return m.group(1).rsplit('.', 1)[-1] if m else None
 
 
@@ -206,6 +229,23 @@ def shadow_of(cls):
 def textures_of(cls):
     src = renderer_src(cls)
     return sorted(set(re.findall(r'"textures/(entity/[\w/]+)\.png"', src)))
+
+
+def flips_y(cls, depth=0):
+    """
+    渲染器在提交模型前是否把 y 轴翻过来。
+
+    @why ModelPart 的 y 向上，屏幕空间 y 向下，原版各渲染器各翻各的：
+          LivingEntityRenderer 一律 `scale(-1,-1,1)`，EndCrystalRenderer 不翻。
+          前端统一按"翻转"处理的话，末地水晶就是倒的——底座浮在水晶上方，
+          而生物都正好正确。这个标记就是那条分界线。
+    """
+    if not cls or depth > 6:
+        return False
+    src = renderer_src(cls)
+    if re.search(r'poseStack\.scale\(\s*-1\.0[fF]?,\s*-1\.0[fF]?,\s*1\.0[fF]?\s*\)', src):
+        return True
+    return flips_y(renderer_extends(cls), depth + 1)
 
 
 def resolve(cls, layers, override_layers=None, depth=0):
@@ -352,6 +392,41 @@ def args_models(args, layers):
     return out
 
 
+# 没有 ModelPart 树的实体：几何在渲染器里现拼，这里记下它拼的是什么。
+#
+# @why ThrownItemRenderer / ItemEntityRenderer 画的是物品模型，TntRenderer 画的是
+#      TNT 方块，ExperienceOrbRenderer 画的是 `quad 0.3×0.3` 的 billboard。
+#      不记下来，这些实体在站上只有一张物品图标，看着像整类功能坏了。
+# @constraint 少部分实体（闪电、标记、文本/方块展示）真的没有固定几何，
+#      它们的形状由实体数据决定，留空比瞎猜一个方块好。
+SHAPES = {
+    'item': {'k': 'item', 'id': 'diamond'},
+    'egg': {'k': 'item', 'id': 'egg'},
+    'ender_pearl': {'k': 'item', 'id': 'ender_pearl'},
+    'experience_bottle': {'k': 'item', 'id': 'experience_bottle'},
+    'snowball': {'k': 'item', 'id': 'snowball'},
+    'eye_of_ender': {'k': 'item', 'id': 'ender_eye'},
+    'firework_rocket': {'k': 'item', 'id': 'firework_rocket'},
+    # 药水贴图是灰度遮罩，颜色来自 PotionContents；给一个标准的水蓝色
+    'potion': {'k': 'item', 'id': 'potion', 'tint': [0.35, 0.42, 0.9]},
+    'splash_potion': {'k': 'item', 'id': 'splash_potion', 'tint': [0.35, 0.42, 0.9]},
+    'lingering_potion': {'k': 'item', 'id': 'lingering_potion', 'tint': [0.35, 0.42, 0.9]},
+    'item_frame': {'k': 'item', 'id': 'item_frame'},
+    'glow_item_frame': {'k': 'item', 'id': 'glow_item_frame'},
+    'painting': {'k': 'item', 'id': 'painting'},
+    'ominous_item_spawner': {'k': 'block', 'id': 'trial_spawner'},
+    'tnt': {'k': 'block', 'id': 'tnt'},
+    'falling_block': {'k': 'block', 'id': 'sand'},
+    # 经验球贴图是 4×4 图集，只取左上那一格；原版按 Icon 索引选格，展示取首格
+    # 图集里第 3 行第 2 格是标准那颗"红芯经验球"，首格是未点亮的灰球
+    'experience_orb': {'k': 'sprite', 'id': 'entity/experience/experience_orb',
+                       'uv': [0.25, 0.5, 0.5, 0.75], 's': 0.5},
+    'fishing_bobber': {'k': 'sprite', 'id': 'entity/fishing/fishing_hook', 's': 0.5},
+    # DragonFireballRenderer 里 poseStack.scale(2, 2, 2)
+    'dragon_fireball': {'k': 'sprite', 'id': 'entity/enderdragon/dragon_fireball', 's': 2},
+}
+
+
 def main():
     layers = load_layers()
     regs = registrations()
@@ -370,6 +445,20 @@ def main():
             if from_args:
                 info['models'] = from_args
         if not info['models']:
+            # 没有骨架：记下渲染器现拼的是什么，前端据此凑几何
+            shape = SHAPES.get(entity)
+            if shape:
+                entities[entity] = {
+                    'r': renderer,
+                    'm': '',
+                    'l': '',
+                    's': info['shadow'],
+                    't': info['textures'][:1],
+                    'v': [],
+                    'layers': [],
+                    'f': 1 if flips_y(renderer) else 0,
+                    'shape': shape,
+                }
             continue
         primary = info['models'][0]
         tex = pick_texture(info['textures'], entity, primary['layer'], index)
@@ -381,6 +470,8 @@ def main():
             't': [tex] if tex else [],
             'v': [m['cls'] for m in info['models']],
             'layers': [m['layer'] for m in info['models']],
+            # 1 = 渲染器自己把 y 翻过来（生物），0 = 没翻（末地水晶这类）
+            'f': 1 if flips_y(renderer) else 0,
         }
 
     data = {'entities': entities, 'renderers': renderers}

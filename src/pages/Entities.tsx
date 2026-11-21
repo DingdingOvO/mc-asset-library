@@ -15,6 +15,7 @@ import {
   loadLayers,
   type Axis,
 } from '@/lib/entityLayers'
+import { loadShapeRig } from '@/lib/shapeRig'
 import { useAsync } from '@/lib/useAsync'
 import { useLibrary } from '@/lib/useLibrary'
 import { usePaged } from '@/lib/usePaged'
@@ -110,7 +111,13 @@ function EntityBrowser({ version }: { version: string }) {
       const hit = lookup(id)
       if (!hit) continue
       const info = table?.[id]
-      const rig = buildRig(hit.model)
+      /**
+       * @constraint 翻转标记必须来自渲染器，不能统一按"翻"处理：
+       *      EndCrystalRenderer 不翻，统一翻会让末地水晶上下颠倒，
+       *      底座浮到晶体上方。
+       */
+      const flip = info?.f !== 0
+      const rig = buildRig(hit.model, flip)
       const poser = createPoser(hit.cls, rig, anim)
       const texture = info?.t[0] ?? ALIAS[id]?.texture ?? hit.model.texture ?? ''
 
@@ -125,7 +132,7 @@ function EntityBrowser({ version }: { version: string }) {
       let baby: Prepared['baby'] = null
       if (size) {
         const babyModel = size.m ? pool[size.m] : null
-        const babyRig = babyModel ? buildRig(babyModel) : rig
+        const babyRig = babyModel ? buildRig(babyModel, flip) : rig
         baby = {
           rig: babyRig,
           poser: createPoser(size.c ?? null, babyRig, anim),
@@ -148,6 +155,44 @@ function EntityBrowser({ version }: { version: string }) {
     }
     return map
   }, [models.data, anims.data, renderers.data, data, layerFile.data])
+
+  /**
+   * 没有骨骼的实体：渲染器现拼的几何（TNT 方块、掉落物、经验球）。
+   *
+   * @why 这类实体在原版里没有 ModelPart 树，之前只显示一张物品图标。
+   *      几何是异步取分片的，所以先建一张表，加载完再逐只替换卡片。
+   */
+  const [shaped, setShaped] = useState<Map<string, Prepared>>(new Map())
+  useEffect(() => {
+    const table = renderers.data?.entities
+    if (!table) return
+    let alive = true
+    const todo = Object.entries(table).filter(([, info]) => info.shape)
+    void Promise.all(
+      todo.map(async ([id, info]) => {
+        const rig = await loadShapeRig(info.shape!, version)
+        if (!rig) return null
+        return [id, {
+          rig,
+          poser: createPoser(null, rig, null),
+          modelClass: '',
+          modelKey: '',
+          layer: '',
+          texture: info.shape!.k === 'sprite' ? info.shape!.id : rig.texture ?? '',
+          shadow: info.s ?? null,
+          baby: null,
+        }] as const
+      }),
+    ).then((rows) => {
+      if (!alive) return
+      const next = new Map<string, Prepared>()
+      for (const row of rows) if (row) next.set(row[0], row[1])
+      setShaped(next)
+    })
+    return () => {
+      alive = false
+    }
+  }, [renderers.data, version])
 
   const [params, setParams] = useSearchParams()
   const [selected, setSelected] = useState<RegistryEntry | null>(null)
@@ -218,8 +263,13 @@ function EntityBrowser({ version }: { version: string }) {
     for (const [id, hit] of prepared) {
       map.set(id, subjectOf(hit, id, defaultPick(id, hit.texture)))
     }
+    // @why 现拼几何的实体也走同一个 subjectOf：它们同样是"骨架 + 姿势"，
+    //      只是姿势恒为初始值，不需要第二条渲染路径
+    for (const [id, hit] of shaped) {
+      if (!map.has(id)) map.set(id, subjectOf(hit, id, {}))
+    }
     return map
-  }, [prepared, subjectOf, defaultPick])
+  }, [prepared, shaped, subjectOf, defaultPick])
 
   const query = params.get('q') ?? ''
   const entries = useMemo(
@@ -241,8 +291,9 @@ function EntityBrowser({ version }: { version: string }) {
      * @why 物品、TNT、画这类实体没有骨骼模型，卡片只能给贴图。让能渲染的排前面，
      *      第一屏就不会看起来像坏了一半。
      */
-    return [...list].sort((a, b) => Number(prepared.has(b.id)) - Number(prepared.has(a.id)))
-  }, [entries, query, prepared])
+    const drawable = (id: string) => prepared.has(id) || shaped.has(id)
+    return [...list].sort((a, b) => Number(drawable(b.id)) - Number(drawable(a.id)))
+  }, [entries, query, prepared, shaped])
 
   const { visible, sentinelRef, total, shown } = usePaged(filtered, 96)
 
@@ -258,13 +309,13 @@ function EntityBrowser({ version }: { version: string }) {
     )
   }
 
-  const active = selected ? (prepared.get(selected.id) ?? null) : null
+  const active = selected ? (prepared.get(selected.id) ?? shaped.get(selected.id) ?? null) : null
   const activeSubject = useMemo(
     () => (selected && active ? subjectOf(active, selected.id, choice) : null),
     [selected, active, subjectOf, choice],
   )
   const busy = loading || models.loading || anims.loading || renderers.loading
-  const solid = prepared.size
+  const solid = prepared.size + shaped.size
 
   return (
     <div className="container">
@@ -291,7 +342,7 @@ function EntityBrowser({ version }: { version: string }) {
 
       <div className="tex-grid">
         {visible.map((entry) => {
-          const hit = prepared.get(entry.id)
+          const hit = prepared.get(entry.id) ?? shaped.get(entry.id)
           return (
             <button
               key={entry.id}
@@ -339,7 +390,7 @@ function EntityBrowser({ version }: { version: string }) {
           version={version}
           title={selected.n}
           subtitle={selected.e}
-          hint="该实体没有骨骼模型（绘制逻辑写在渲染器里，不产生 ModelPart 树），只展示贴图"
+          hint={active ? undefined : '该实体没有固定几何（形状由实体数据决定），只展示贴图'}
           rows={[
             { key: '实体 ID', value: selected.id },
             ...(active?.modelClass ? [{ key: '模型类', value: active.modelClass }] : []),

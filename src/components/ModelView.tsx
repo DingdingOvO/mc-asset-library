@@ -258,7 +258,20 @@ export function ModelView({
 
   const textureKey =
     subject.kind === 'entity'
-      ? [subject.texture, ...(subject.layers ?? []).map((layer) => layer.texture)].join('|')
+      ? /**
+         * @constraint 现拼几何（TNT、掉落物）的每个面自带纹理，一张顶、一张侧、
+         *      一张底。只预载 subject.texture 的话，GPU 里除第一张之外全是占位色，
+         *      TNT 会变成"一面红字、五面纯灰"。
+         */
+        [
+          ...new Set([
+            subject.texture,
+            ...(subject.layers ?? []).map((layer) => layer.texture),
+            ...subject.rig.parts.flatMap((part) => part.faces.map((face) => face.tex ?? '')),
+          ]),
+        ]
+          .filter((tex) => tex.includes('/'))
+          .join('|')
       // @constraint 贴图名必须含 `/`：模型里 `textures: { all: "#all" }` 这种
       //      自引用会被解析成裸名字 `all`，拼出来就是 textures/all.png，
       //      每个用到该模型的页面都会多一条 404。裸名字不进预载清单。

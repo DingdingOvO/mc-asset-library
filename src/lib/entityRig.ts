@@ -14,6 +14,13 @@ export interface RigFace {
   /** 顶点在 part.verts 里的起始下标（4 个连续顶点） */
   at: number
   uv: number[]
+  /**
+   * 这个面自己的纹理，缺省用整张骨架的纹理。
+   *
+   * @why 没有骨骼的实体（TNT、掉落物）是把方块/物品模型的面直接搬过来的，
+   *      一个模型里就有顶、侧、底三张图，一张骨架纹理装不下。
+   */
+  tex?: string
 }
 
 export interface RigPart {
@@ -49,6 +56,14 @@ export interface Rig {
   parts: RigPart[]
   /** 默认纹理（相对 textures/，不含 .png） */
   texture: string | null
+  /**
+   * 渲染器是否把 y 轴翻过来，默认 true（生活实体都翻）。
+   *
+   * @why ModelPart 的 y 向上、屏幕 y 向下，原版各渲染器各翻各的：
+   *      LivingEntityRenderer 里有 `scale(-1,-1,1)`，EndCrystalRenderer 没有。
+   *      统一翻转会把末地水晶倒过来——黑曜石底座浮在晶体上方。
+   */
+  flipY: boolean
 }
 
 /**
@@ -141,7 +156,7 @@ function expandBox(
   }
 }
 
-export function buildRig(model: EntityModel): Rig {
+export function buildRig(model: EntityModel, flipY = true): Rig {
   const parts: RigPart[] = []
   /**
    * 名字 → 最近一次出现的下标。
@@ -173,6 +188,7 @@ export function buildRig(model: EntityModel): Rig {
     texH: model.texH,
     parts,
     texture: model.texture,
+    flipY,
   }
 }
 
@@ -188,7 +204,18 @@ export interface PartPose {
   yScale: number
   zScale: number
   visible: boolean
+  /**
+   * 四元数旋转 [x, y, z, w]，非空时取代欧拉角三轴。
+   *
+   * @why 原版有一部分动作不走 `part.yRot = …`，而是 `part.rotateBy(四元数)`：
+   *      末地水晶绕 (0.707,0,0.707) 轴拧 60°，玩家旋身斩的旋风块也是。
+   *      欧拉角表达不了"绕任意轴"，硬套三轴会把立方体拧成歪的骰子。
+   */
+  q?: Quat | null
 }
+
+/** 四元数 [x, y, z, w]，与 JOML 的 Quaternionf 字段顺序一致 */
+export type Quat = [number, number, number, number]
 
 export function initialPose(part: RigPart): PartPose {
   return {
@@ -202,6 +229,7 @@ export function initialPose(part: RigPart): PartPose {
     yScale: part.scale[1],
     zScale: part.scale[2],
     visible: true,
+    q: null,
   }
 }
 
@@ -213,6 +241,35 @@ export function initialPose(part: RigPart): PartPose {
  *      把 scale 当平移后的轴对齐缩放，猫的斜身子会被压成歪的。
  */
 function matrix(pose: PartPose): number[] {
+  const kx = pose.xScale
+  const ky = pose.yScale
+  const kz = pose.zScale
+
+  /**
+   * 四元数分支。
+   *
+   * @constraint 用标准 3×3 展开，别在这里再转回欧拉角：Quaternionf 的旋转顺序
+   *      是右乘累积的（Qy · Qaxis），转欧拉角会引入万向节与顺序歧义，
+   *      末地水晶的轴是斜的 (SIN45,0,SIN45)，转出来必然错。
+   */
+  if (pose.q) {
+    const [x, y, z, w] = pose.q
+    const xx = x * x
+    const yy = y * y
+    const zz = z * z
+    const xy = x * y
+    const xz = x * z
+    const yz = y * z
+    const wx = w * x
+    const wy = w * y
+    const wz = w * z
+    return [
+      (1 - 2 * (yy + zz)) * kx, (2 * (xy - wz)) * ky, (2 * (xz + wy)) * kz,
+      (2 * (xy + wz)) * kx, (1 - 2 * (xx + zz)) * ky, (2 * (yz - wx)) * kz,
+      (2 * (xz - wy)) * kx, (2 * (yz + wx)) * ky, (1 - 2 * (xx + yy)) * kz,
+    ]
+  }
+
   const { xRot: rx, yRot: ry, zRot: rz } = pose
   const cx = Math.cos(rx)
   const sx = Math.sin(rx)
@@ -236,9 +293,6 @@ function matrix(pose: PartPose): number[] {
   const g = -sy
   const h = cy * sx
   const i = cy * cx
-  const kx = pose.xScale
-  const ky = pose.yScale
-  const kz = pose.zScale
   return [a * kx, b * ky, c * kz, d * kx, e * ky, f * kz, g * kx, h * ky, i * kz]
 }
 
@@ -292,6 +346,7 @@ export function rigFaces(
   poses: Map<string, PartPose>,
   texture: string,
   style?: LayerStyle,
+  flipY = true,
 ): Face3D[] {
   /** 3×3 旋转 + 平移，部件自己的局部变换。键是部件下标，同名部件不会互相覆盖 */
   const transforms = new Map<number, { m: number[]; t: number[] }>()
@@ -329,7 +384,8 @@ export function rigFaces(
       const vy = part.verts[i * 3 + 1]!
       const vz = part.verts[i * 3 + 2]!
       world[i * 3] = m[0]! * vx + m[1]! * vy + m[2]! * vz + t[0]!
-      world[i * 3 + 1] = -(m[3]! * vx + m[4]! * vy + m[5]! * vz + t[1]!)
+      const wy = m[3]! * vx + m[4]! * vy + m[5]! * vz + t[1]!
+      world[i * 3 + 1] = flipY ? -wy : wy
       world[i * 3 + 2] = m[6]! * vx + m[7]! * vy + m[8]! * vz + t[2]!
     }
 
@@ -350,7 +406,7 @@ export function rigFaces(
           world[face.at * 3 + 11]!,
         ],
         uv: face.uv,
-        tex: texture,
+        tex: face.tex ?? texture,
         shade: style?.unlit ? false : true,
         tint: style?.tint,
         bias: style?.bias,
@@ -402,7 +458,7 @@ export function entityFaces(
   texture: string,
   layers?: EntityLayer[] | null,
 ): Face3D[] {
-  const faces = rigFaces(rig, poses, texture)
+  const faces = rigFaces(rig, poses, texture, undefined, rig.flipY)
   if (!layers || layers.length === 0) return faces
   /**
    * @constraint 每一层的偏置必须递增。羊毛有底绒和外套两层、它们的几何几乎重合，
@@ -415,7 +471,7 @@ export function entityFaces(
       unlit: layer.unlit,
       translucent: layer.translucent,
       bias: LAYER_BIAS * step,
-    })
+    }, rig.flipY)
     step += 1
     for (const face of extra) faces.push(face)
   }

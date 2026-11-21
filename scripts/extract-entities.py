@@ -674,19 +674,16 @@ def parse_cubes(expr, env):
     return cubes
 
 
-def parse_pose(text, env):
-    """PartPose → (x, y, z, xRot, yRot, zRot, xScale, yScale, zScale)"""
-    text = text.strip()
-    if text in env and isinstance(env[text], tuple):
-        return env[text]
-    if 'PartPose.ZERO' in text:
-        return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
+def _pose_base(text, env):
+    """链式调用之外的基础姿势"""
     if text.startswith('new PartPose'):
         inner, _ = read_balanced(text, text.find('(') + 1)
         vals = [num(a, env) for a in split_args(inner)]
         while len(vals) < 9:
             vals.append(1.0 if len(vals) >= 6 else 0.0)
         return tuple(vals[:9])
+    if 'PartPose.ZERO' in text:
+        return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
     m = re.search(r'PartPose\.(offsetAndRotation|offset|rotation)\s*\(', text)
     if not m:
         return (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 1.0, 1.0, 1.0)
@@ -697,6 +694,42 @@ def parse_pose(text, env):
     while len(vals) < 6:
         vals.append(0.0)
     return tuple(vals[:6] + [1.0, 1.0, 1.0])
+
+
+def parse_pose(text, env):
+    """
+    PartPose → (x, y, z, xRot, yRot, zRot, xScale, yScale, zScale)
+
+    @why 链式调用必须按书写顺序叠加。`PartPose.ZERO.withScale(0.875f)`、
+          `PartPose.offset(...).scaled(0.75f)` 在源码里到处都是，只解析最内层的
+          构造函数会把缩放整条丢掉：末地水晶的外层玻璃 1.0、内层 0.875、
+          火焰 0.765625 全变成同一个尺寸，三层完全重合，肉眼看只剩最外层那圈
+          贴图边——就是"水晶显示不出来/只剩一个黑框"。
+    """
+    text = text.strip()
+    if text in env and isinstance(env[text], tuple):
+        return env[text]
+    pose = _pose_base(text, env)
+    for m in re.finditer(r'\.(withScale|scaled|translated)\s*\(', text):
+        inner, _ = read_balanced(text, m.end())
+        vals = [num(a, env) for a in split_args(inner) if a.strip()]
+        if not vals:
+            continue
+        x, y, z, xr, yr, zr, sx, sy, sz = pose
+        kind = m.group(1)
+        if kind == 'withScale':
+            sx = sy = sz = vals[0]
+        elif kind == 'scaled':
+            # scaled(f) 等价于 scaled(f, f, f)；它同时缩放枢轴与尺寸
+            a, b, c = (vals[:1] * 3) if len(vals) == 1 else vals[:3]
+            x, y, z = x * a, y * b, z * c
+            sx, sy, sz = sx * a, sy * b, sz * c
+        else:
+            x += vals[0]
+            y += vals[1] if len(vals) > 1 else 0.0
+            z += vals[2] if len(vals) > 2 else 0.0
+        pose = (x, y, z, xr, yr, zr, sx, sy, sz)
+    return pose
 
 
 def split_plus(text):

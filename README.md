@@ -76,6 +76,10 @@ pnpm run setup:lite   # 下载约 130MB，落盘 145MB；完整版再多半 GB �
 | `scripts/extract-entities.py` `retain_parts` | `PartDefinition.retainPartsAndChildren`：同一个 `MeshDefinition` 被多个图层复用时，各层要用 retain 把无关部件的 cube 清空（旋风人的头身层是 32×32 网格，里面还带着 128×128 的风涡盒子） |
 | `scripts/extract-entities.py` `parse_cubes` | `addBox(id, x, y, z, w, h, d, texX, texY)` 与 `addBox(id, …, CubeDeformation, texX, texY)` 两种带 id 的重载，UV 在参数**末尾**（末影龙 65 个盒子全是这个写法） |
 | `scripts/extract-layers.py` | `addLayer(new XxxLayer(...))` 的整条链，含 `RenderTypes.entityTranslucent` / `breezeWind` 这类需要混合的图层（按 cutout 抠像会把风涡抠成几条硬白边） |
+| `scripts/extract-entities.py` `parse_pose` | `PartPose.ZERO.withScale(f)` / `.scaled(f)` / `.translated(x,y,z)` 的链式叠加（末地水晶三层玻璃是 1 / 0.875 / 0.765625，漏掉缩放三层就完全重合） |
+| `lib/entityRig.ts` `flipY` · `scripts/extract-renderers.py` `flips_y` | 各渲染器自己翻不翻 y：`LivingEntityRenderer` 有 `scale(-1,-1,1)`，`EndCrystalRenderer` 没有；统一翻会让末地水晶倒过来 |
+| `lib/anim.ts` `MC.qAxis/qmul` · `PartPose.q` | `ModelPart.rotateBy(Quaternionf)`：末地水晶绕 `(SIN45,0,SIN45)` 拧 60° 再叠 Y 轴自转，欧拉角表达不了斜轴 |
+| `lib/shapeRig.ts` · `extract-renderers.py` `SHAPES` | 没有 `ModelPart` 树的实体按渲染器实际绘制的东西凑几何：`ThrownItemRenderer` 画物品模型、`TntRenderer` 画 TNT 方块、`ExperienceOrbRenderer` 画 4×4 图集里的单格 billboard |
 | `lib/anim.ts` | `setupAnim` 与 `LivingEntity.updateWalkAnimation` 的逐步复刻 |
 | `lib/mcui/*` | `TooltipRenderUtil`、`NineSlice`、`GuiGraphics.blitSprite`、`AbstractContainerScreen` 的槽位坐标 |
 | `lib/font.ts` | `UnihexProvider.Glyph` 的 `unpackBitsToBytes`、字形 `advance` 规则 |

@@ -203,7 +203,73 @@ BAD_RE = re.compile(r'\b(?:new|switch|while|for|return|throw)\b|->|\.setupAnim\(
 
 CALL_RE = re.compile(r'\b([A-Za-z_]\w*)\.(\w+)\s*\(')
 BAD_BODY = re.compile(r'\b(?:switch|case|while|try|catch|default)\b|\bbreak\b|\bcontinue\b')
-SAFE_RECV = {'state', 'Mth', 'MC', 'Math', 'AnimationUtils'}
+SAFE_RECV = {'state', 'Mth', 'MC', 'Math', 'AnimationUtils', 'ANIM'}
+
+
+# 绕单轴旋转的四元数工厂；%s 处填角度表达式
+QUAT_AXIS = {
+    'X': 'qAxis(%s, 1, 0, 0)',
+    'Y': 'qAxis(%s, 0, 1, 0)',
+    'Z': 'qAxis(%s, 0, 0, 1)',
+}
+
+
+def quat_of(expr, fields):
+    """
+    JOML 四元数表达式 → 等价的 MC.qmul 组合表达式；不认识就返回 None。
+
+    @why 原版有一部分动作不走欧拉角，而是 `part.rotateBy(圈四元数)`：
+          末地水晶把三个立方体绕 (SIN45,0,SIN45) 轴拧 60°，再叠一层绕 Y 的自转——
+          不转译的话三层玻璃全部轴对齐重合，只剩最外那圈贴图边，
+          看起来就是一个"没有水晶"的黑框。
+
+    @constraint 只认模型源码里真实出现过的两种写法。其余写法引用的是模型外部的
+          状态（生物朝向、动画历史），强行翻译只会得到一个错误的朝向。
+    """
+    e = expr.strip()
+    m = re.match(r'^new\s+Quaternionf\(\)\s*\.setAngleAxis\(', e)
+    if m:
+        inner, nxt = call_args(e, m.end() - 1)
+        vals = [v for v in (piece.strip() for piece in inner.split(',')) if v]
+        if len(vals) != 4:
+            return None
+        out = 'MC.qAxis(%s)' % ', '.join(conv_expr(v, fields) for v in vals)
+        rest = e[nxt:].strip()
+        while rest:
+            mm = re.match(r'^\.(rotateX|rotateY|rotateZ)\(', rest)
+            if not mm:
+                return None
+            inner2, nxt2 = call_args(rest, mm.end() - 1)
+            fn = QUAT_AXIS[mm.group(1)[-1]]
+            out = 'MC.qmul(%s, MC.%s)' % (out, fn % conv_expr(inner2, fields))
+            rest = rest[nxt2:].strip()
+        return out
+
+    m = re.match(r'^Axis\.([XYZ])([PN])\.(rotationDegrees|rotation)\(', e)
+    if m:
+        inner, nxt = call_args(e, m.end() - 1)
+        axis, sign, kind = m.group(1), m.group(2), m.group(3)
+        angle = conv_expr(inner, fields)
+        # @constraint rotationDegrees 收度、rotation 收弧度、rotateAxis 收弧度，
+        #      三者混用会让水晶少转 57 倍
+        if kind == 'rotationDegrees':
+            angle = '((%s) * Math.PI / 180)' % angle
+        if sign == 'N':
+            angle = '-(%s)' % angle
+        out = 'MC.' + QUAT_AXIS[axis] % angle
+        rest = e[nxt:].strip()
+        while rest:
+            mm = re.match(r'^\.rotateAxis\(', rest)
+            if not mm:
+                return None
+            inner2, nxt2 = call_args(rest, mm.end() - 1)
+            vals = [v for v in (piece.strip() for piece in inner2.split(',')) if v]
+            if len(vals) != 4:
+                return None
+            out = 'MC.qmul(%s, MC.qAxis(%s))' % (out, ', '.join(conv_expr(v, fields) for v in vals))
+            rest = rest[nxt2:].strip()
+        return out
+    return None
 
 
 def is_transpilable_stmt(stmt, fields, calls=None, cls=None):
@@ -260,6 +326,14 @@ def transpile(stmts, fields, out, indent=0, prefix='p.', allow_return=False, cal
             if m:
                 out.append('%s__parent(%s);' % (pad, conv_expr(m.group(1), fields)))
                 continue
+            # 四元数旋转：this.cube.rotateBy(new Quaternionf()...)
+            m = re.match(r'^this\.(\w+)\.rotateBy\((.+)\);$', stmt, re.S)
+            if m:
+                quat = quat_of(m.group(2), fields)
+                if quat:
+                    part = m.group(1)
+                    out.append('%s%s%s.q = MC.qmul(%s%s.q, %s);' % (pad, prefix, part, prefix, part, quat))
+                    continue
             # 关键帧状态动画：this.flyingAnimation.apply(state.flyAnimationState, ageInTicks)
             m = re.match(r'^this\.(\w+)\.apply\((.+)\);$', stmt, re.S)
             if m:
@@ -377,6 +451,53 @@ def transpile(stmts, fields, out, indent=0, prefix='p.', allow_return=False, cal
             transpile(else_block, fields, out, indent + 1, prefix, allow_return, calls, cls)
         out.append('%s}' % pad)
     return ok
+
+
+def load_renderer_utils(src):
+    """
+    渲染器里的 `public static float xxx(...)` → ANIM 函数。
+
+    @why 有些动作参数算在渲染器而不是模型里：末地水晶的上下浮动来自
+          `EndCrystalRenderer.getY(ageInTicks)`；被跳过之后
+          `float crystalY = …` 整行消失，下一行 `outerGlass.y += crystalY / 2`
+          加的是 0，水晶就永远钉在同一个高度、不动也不飘。
+
+    @return ({方法名: {params, code}}, [(类名, 方法名)])
+    """
+    # 模型源码与渲染器源码是两个独立的反编译产物（modelsrc / rendsrc），
+    # 只能按目录名替换过去，不能靠 ../ 上溯
+    guess = src.replace('modelsrc', 'rendsrc')
+    base = os.path.abspath(os.path.join(guess, '..', 'renderer', 'entity'))
+    if not os.path.isdir(base):
+        base = '/tmp/rendsrc/net/minecraft/client/renderer/entity'
+    if not os.path.isdir(base):
+        return {}, []
+    found, calls = {}, []
+    for name in sorted(os.listdir(base)):
+        if not name.endswith('.java'):
+            continue
+        cls = name[:-5]
+        raw = strip_comments(open(os.path.join(base, name), encoding='utf-8', errors='replace').read())
+        for m in re.finditer(r'public\s+static\s+(?:float|double)\s+(\w+)\s*\(([^)]*)\)\s*\{', raw):
+            fn, params = m.group(1), [p.strip().split()[-1] for p in m.group(2).split(',') if p.strip()]
+            body = raw[m.end():]
+            stmts, _ = parse_statements(body, 0, True)
+            out = []
+            ok = transpile(stmts, {}, out, 0, '', True, None, None)
+            code = '\n'.join(out).strip()
+            if not ok or not code or '/* skip' in code or 'return' not in code:
+                continue
+            key = fn if fn not in found else '%s_%s' % (cls, fn)
+            found[key] = {'params': params, 'code': code}
+            calls.append((cls, fn, key))
+    return found, calls
+
+
+def apply_static_calls(text, calls):
+    """EndCrystalRenderer.getY(x) → ANIM.getY(x)"""
+    for cls, fn, key in calls:
+        text = re.sub(r'\b%s\s*\.\s*%s\s*\(' % (re.escape(cls), re.escape(fn)), 'ANIM.%s(' % key, text)
+    return text
 
 
 def load_animation_utils(src):
@@ -697,6 +818,20 @@ def numeric_consts(raw):
     return table
 
 
+def expr_consts(raw):
+    """
+    static final float X = <任意表达式>; → {X: 'JS 表达式'}
+
+    @why 常量不一定是字面量：末地水晶的旋转轴是 `SIN_45 = (float)Math.sin(Math.PI/4)`，
+          只认字面量会漏掉它。漏掉之后 guard 把 SIN_45 当 0，轴退化成 (0,0,0)，
+          绕轴旋转变成"不旋转"，三层玻璃仍然重合。
+    """
+    table = {}
+    for m in re.finditer(r'static\s+final\s+(?:float|double|int|long)\s+(\w+)\s*=\s*(.+?);', raw, re.S):
+        table[m.group(1)] = conv_expr(m.group(2).strip(), {})
+    return table
+
+
 
 def camel_words(text):
     """walkWithItem → WALK_WITH_ITEM"""
@@ -896,6 +1031,10 @@ def main():
     global _DEFS, _OWNERS
     _DEFS, _OWNERS = anim_definitions()
     anims = load_animation_utils(SRC)
+    # @why 渲染器里的静态数值方法要和 AnimationUtils 放在同一张表：
+    #      转译时它们统一变成 ANIM.xxx(...)，前端只认一个命名空间。
+    static_utils, static_calls = load_renderer_utils(SRC)
+    anims.update(static_utils)
     models = {}
     files = []
     for root, _dirs, names in os.walk(SRC):
@@ -962,7 +1101,7 @@ def main():
                 attack_parts if 'setupAttackAnimation' in header else None)
             if target is None:
                 continue
-            setup_texts.append(strip_switch(inner))
+            setup_texts.append(apply_static_calls(strip_switch(inner), static_calls))
 
         # 辅助方法先内联：调用白名单要在转译之前定下来
         inline_src, calls = collect_inlines(name, setup_texts, fields)
@@ -972,16 +1111,17 @@ def main():
                 attack_parts if 'setupAttackAnimation' in header else None)
             if target is None:
                 continue
-            stmts, _ = parse_statements(strip_switch(inner))
+            stmts, _ = parse_statements(apply_static_calls(strip_switch(inner), static_calls))
             out = []
             transpile(stmts, fields, out, 0, 'p.', target is attack_parts, calls, name)
             target.append('\n'.join(out))
 
-        # 常量字段：内联后 this.MAX_X 变成 p.MAX_X，按字面值展开
-        for const_name, const_value in numeric_consts(raw).items():
+        # 常量字段：内联后 this.MAX_X 变成 p.MAX_X，裸标识符也要展开
+        for const_name, const_expr in expr_consts(raw).items():
             for bucket in (code_parts, attack_parts):
                 for index, text in enumerate(bucket):
-                    bucket[index] = re.sub(r'\bp\.%s\b' % const_name, const_value, text)
+                    text = re.sub(r'\bp\.%s\b' % const_name, '(%s)' % const_expr, text)
+                    bucket[index] = re.sub(r'(?<![\w.])%s\b' % const_name, '(%s)' % const_expr, text)
         if inline_src:
             for index, text in enumerate(code_parts):
                 code_parts[index] = rewrite_calls(text, calls, name)

@@ -7,6 +7,7 @@
  *      由 scripts/extract-renderers.py 反编译挖出来，这里只做查表。
  */
 import { MC_BASE } from './mc'
+import type { EntityShape } from './shapeRig'
 import { fetchWithRetry } from './net'
 
 export interface EntityRenderInfo {
@@ -24,6 +25,16 @@ export interface EntityRenderInfo {
   v: string[]
   /** 各变体对应的 ModelLayers 键（[0] 是成年体） */
   layers?: string[]
+  /**
+   * 1 = 渲染器提交模型前把 y 翻了（活体实体），0 = 没翻（末地水晶、投掷物）。
+   * 缺省按 1 处理：老数据没有这个字段时，翻转才是绝大多数情况。
+   */
+  f?: number
+  /**
+   * 没有骨架时渲染器现拼的几何（方块 / 物品 / billboard）。
+   * 有它才能画出 TNT、掉落物、经验球，否则只能给一张物品图标。
+   */
+  shape?: EntityShape
 }
 
 export interface RendererFile {
@@ -37,7 +48,7 @@ export function loadRenderers(version: string): Promise<RendererFile> {
   const hit = cache.get(version)
   if (hit) return hit
   const task = (async () => {
-    const response = await fetchWithRetry(`${MC_BASE}/${version}/entityrenderers.json?v=2`)
+    const response = await fetchWithRetry(`${MC_BASE}/${version}/entityrenderers.json?v=3`)
     if (!response.ok) throw new Error(`实体渲染表加载失败：${response.status}`)
     return (await response.json()) as RendererFile
   })()
