@@ -110,6 +110,41 @@ export function drawBook(
 /** 地图控件：64×64 的底图按 2 倍画，标记 8×8 texel 按 1 倍 */
 export const MAP_GUI = { width: 128, height: 128, icon: 8 } as const
 
+/**
+ * 地图色板。
+ *
+ * @why 原版地图每一格是 44 个基色 × 4 档明暗（`MapColor`），共 236 项。全抄过来
+ *      是 236 个按钮、四列滚动，找「草地的浅色」要滑半天。这里按基色分组、
+ *      每组四档明暗压成一行，取最常见的 14 组 × 4 = 56 色——够画村庄、海、
+ *      雪原、矿洞这几种常见构图，色块数量也能在一屏里排完。
+ * @constraint 顺序即 `paint` 数组里存的值（值是下标 + 1，0 表示空格）。
+ *      改动顺序会让已存的工程文件颜色整体错位，只能在末尾追加。
+ */
+export const MAP_PALETTE: readonly (readonly [string, string, string, string])[] = [
+  ['#8b8b8b', '#7a7a7a', '#6a6a6a', '#585858'], // 石
+  ['#7fb238', '#6ea031', '#5c8828', '#4a6f20'], // 草
+  ['#c7b299', '#b09e88', '#97876f', '#7a6d59'], // 沙
+  ['#736c56', '#645e4b', '#544f3f', '#413d31'], // 泥土
+  ['#5a8bd0', '#4f79b4', '#426596', '#355078'], // 水
+  ['#3a5a8c', '#324d78', '#2a4063', '#21324d'], // 深海
+  ['#e8f4f8', '#d6e6ee', '#bccfd9', '#9fb2bd'], // 雪
+  ['#a8c8e8', '#93b2d2', '#7d99b6', '#667e97'], // 冰
+  ['#4f7a28', '#446a22', '#39581c', '#2d4616'], // 树叶
+  ['#8f7a52', '#7d6a46', '#6b5a3a', '#574a2f'], // 木头
+  ['#d8c88a', '#c0b078', '#a59666', '#877a53'], // 干草/路径
+  ['#b0b0b0', '#9a9a9a', '#848484', '#6e6e6e'], // 石头建筑
+  ['#8899a0', '#76868c', '#647277', '#525e63'], // 砖/瓦
+  ['#2b2b2b', '#232323', '#1b1b1b', '#131313'], // 岩浆/黑曜石
+] as const
+
+/** 色板下标 → CSS 颜色；0 预留为「空」，从 1 开始 */
+export function paletteColor(index: number): string | null {
+  if (index <= 0) return null
+  const flat = Math.floor((index - 1) / 4)
+  const level = (index - 1) % 4
+  return MAP_PALETTE[flat]?.[level] ?? null
+}
+
 export interface MapMarker {
   /** 贴图名，见 `map/decorations/*` */
   icon: string
@@ -130,9 +165,16 @@ export function drawMap(
   spec: MapSpec,
   /** 标记贴图，按 `MapMarker.icon` 索引；缺的标记直接跳过而不是画一块底图 */
   icons: Map<string, CanvasImageSource>,
+  /**
+   * 已光栅化的笔刷层（128×128 的离屏画布），null 表示没画过。
+   * @constraint 必须由调用方缓存并只在脏了时重画：每帧遍历 16384 个像素再
+   *      putImageData 是纯 CPU 循环，拖动笔刷时会直接掉到个位数帧率。
+   */
+  paint: CanvasImageSource | null = null,
 ): void {
   ctx.imageSmoothingEnabled = false
   ctx.drawImage(background, 0, 0, MAP_GUI.width, MAP_GUI.height)
+  if (paint) ctx.drawImage(paint, 0, 0, MAP_GUI.width, MAP_GUI.height)
 
   /**
    * 缩放等级用刻度表达：原版这一档由服务端地图数据决定（一格代表多少方块），

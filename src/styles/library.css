@@ -1851,7 +1851,17 @@ button:disabled,
   color: var(--text-muted);
   font-size: 12.5px;
   cursor: pointer;
-  transition: background 0.15s ease, color 0.15s ease;
+  /* @why 弹回曲线用在选中态：点下去先微微压过界再回正，手指离开时能感到
+     "这一下确实落到了"。纯颜色过渡没有这个信息。 */
+  transition:
+    background 0.18s ease,
+    color 0.18s ease,
+    border-color 0.18s ease,
+    transform 0.32s var(--spring);
+}
+
+.ui-tabs__item:active {
+  transform: scale(0.95);
 }
 
 .ui-tabs__item:hover {
@@ -1870,7 +1880,9 @@ button:disabled,
 .studio {
   display: grid;
   flex: 1;
-  grid-template-columns: 268px minmax(0, 1fr);
+  /* @why 288 而不是 268：告示牌面板里「每行最多 15 字，与原版一致；留空的
+     行不绘制」在 240px 内要折成三行，读起来像打散的词。 */
+  grid-template-columns: 288px minmax(0, 1fr);
   min-height: 0;
 }
 
@@ -1906,6 +1918,10 @@ button:disabled,
 .studio__canvas {
   image-rendering: pixelated;
   filter: drop-shadow(0 10px 28px rgb(0 0 0 / 18%));
+  /* @why 切页签时重新挂载（key 跟着 kind 走），弹一下告诉用户"换了一张图"。
+     没有这一下，四个页签的预览都是静止位图，切换看起来像没反应。 */
+  animation: studio-pop 0.36s var(--spring) both;
+  transform-origin: center;
   /* @constraint 只允许缩小不允许放大：书页 192 宽在 2 倍下是 384，
      390px 手机减去内边距只剩 362，不夹紧就会横滚——而横向滚动条自己又吃掉
      15px 宽度，第二次挤压又让竖向滚动条出现，最后两个方向都在滚。 */
@@ -1931,9 +1947,151 @@ button:disabled,
   font-family: inherit;
 }
 
+/**
+ * 会变成游戏画面的那几个输入框用点阵字。
+ *
+ * @why 你在书页里敲的字，画到 canvas 上是 unifont 的 16×16 点阵；输入框却渲染
+ *      成系统无衬线，同一个字两边长得不一样，也就没法判断「这行会不会折行」。
+ *      所见即所得不只是一句口号，是排版判断的前提。
+ * @constraint 字号必须 16px：点阵字形按 16 像素网格设计，13/15px 会被浏览器
+ *      重采样成半像素，笔画糊成一团，比系统字体还难看。行高 1.3 让 10 行正文
+ *      正好落在 208px 里，与导出图的折行节奏对得上。
+ */
+.studio__input,
+.studio__textarea {
+  font-family: var(--font-pixel);
+  font-size: 16px;
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+
 .studio__textarea {
   resize: vertical;
-  line-height: 1.6;
+  line-height: 1.3;
+}
+
+/* 地图预览可画：十字光标比手型更能说明「按下就是落笔」 */
+.studio__canvas--draw {
+  cursor: crosshair;
+  /* @constraint 必须关掉触摸手势：手机上按住拖动会被当成滚动，画不出线 */
+  touch-action: none;
+}
+
+.studio__stage {
+  position: relative;
+}
+
+/* 悬停格高亮：尺寸和位置由 JS 直接写，这里只管长相 */
+.studio__caret {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  width: 8px;
+  height: 8px;
+  border: 1px solid var(--accent);
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 70%) inset;
+  opacity: 0;
+  pointer-events: none;
+  /* @constraint 不加 transition：跟手的东西有延迟就变成"拖影" */
+}
+
+.studio__status {
+  position: absolute;
+  left: 50%;
+  bottom: 6px;
+  transform: translateX(-50%);
+  margin: 0;
+  padding: 3px 8px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  pointer-events: none;
+}
+
+.board__tools {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 4px;
+}
+
+.board__tool {
+  padding: 5px 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+
+.board__tool:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--surface-muted);
+}
+
+.board__tool:active:not(:disabled) {
+  transform: scale(0.96);
+}
+
+.board__tool:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.board__tool--on {
+  border-color: var(--accent);
+  background: var(--accent-muted);
+  color: var(--accent);
+  font-weight: 650;
+}
+
+/* 快捷键字母：跟着中文标签走，比塞进 title 更容易被发现 */
+.board__tool em {
+  margin-left: 3px;
+  font-style: normal;
+  font-size: 9.5px;
+  letter-spacing: 0.02em;
+  opacity: 0.6;
+}
+
+/* @why 两列而非四列：14 组基色若一列一组要占 14 行、364px 高，面板一半都给了
+   色板。两列并排后 7 行、180px，同一行的四档明暗仍然相邻，比较起来还是直接的。 */
+.board__palette {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.board__row {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 3px;
+}
+
+.board__swatch {
+  aspect-ratio: 1;
+  min-height: 17px;
+  padding: 0;
+  border: 1px solid rgb(0 0 0 / 18%);
+  border-radius: 3px;
+  cursor: pointer;
+  transition: transform 100ms ease, box-shadow 100ms ease;
+}
+
+.board__swatch:hover {
+  transform: scale(1.12);
+  box-shadow: 0 2px 6px rgb(0 0 0 / 18%);
+}
+
+.board__swatch--on {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
 }
 
 .studio__swatches {
@@ -3513,4 +3671,67 @@ button:disabled,
   color: var(--text-muted);
   font-size: 11px;
   line-height: 1.5;
+}
+
+/* ===== 非容器界面工作室：动效 ===== */
+
+@keyframes studio-pop {
+  from {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+/* @constraint 面板用位移淡入而不是缩放：里面有输入框，缩放会带着文字一起重采样，
+   那 0.3 秒里点进去打字，光标位置和点击位置对不上。 */
+.studio__panel > * {
+  animation: panel-slide 0.3s var(--ease-out) both;
+}
+
+@keyframes panel-slide {
+  from {
+    opacity: 0;
+    transform: translateX(-5px);
+  }
+}
+
+/* 色块和工具键的按下反馈：transform 走弹簧，回弹比线性更像实体按键 */
+.board__tool:active:not(:disabled),
+.board__swatch:active {
+  transform: scale(0.9);
+  transition-duration: 60ms;
+}
+
+.board__swatch:hover {
+  transition-timing-function: var(--spring);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .studio__canvas,
+  .studio__panel > * {
+    animation: none;
+  }
+
+  .ui-tabs__item,
+  .board__tool,
+  .board__swatch {
+    transition: none;
+  }
+}
+
+/* @constraint 导出按钮不能被下拉框挤掉：select 带 width:100%，flex 行里会
+   把按钮压成两行（"导出 / PNG"）。给 select 可伸缩、按钮固定。 */
+.studio__export .studio__select {
+  flex: 1;
+  min-width: 0;
+}
+
+.studio__export .btn {
+  flex: none;
+  white-space: nowrap;
 }

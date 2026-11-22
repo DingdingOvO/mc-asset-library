@@ -1,3 +1,21 @@
+/**
+ * 游戏内字体。
+ *
+ * @why 只给「界面页」里会变成游戏画面文字的那几个输入框用：你在书页/告示牌里
+ *      敲的字，画到 canvas 上用的是 unifont 点阵，输入框却渲染成系统无衬线，
+ *      同一个字在两边长得不一样，排版判断（几时折行、占多宽）全靠猜。
+ *      站点其余地方一律系统字体——素材站是网页，不是游戏。
+ * @constraint font-display: swap + 只声明 400。点阵没有真粗体，让浏览器合成
+ *      外扩 0.5px 在 16px 下还能看；多声明字重只是逼浏览器去猜。
+ */
+@font-face {
+  font-family: 'Unifont UI';
+  src: url('/fonts/unifont-ui.woff2') format('woff2');
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
 :root {
   --bg: #ffffff;
   --surface: #ffffff;
@@ -16,9 +34,26 @@
   --radius: 8px;
   --radius-lg: 12px;
 
+  /**
+   * 动画曲线。
+   *
+   * @why `linear()` 是现代浏览器唯一能表达多段回弹的写法，等价于 EaseGUI 那类
+   *      mod 在代码里跑的 spring：先冲过目标（1.05）再收回来。普通 ease-out
+   *      停在原地没有"落地感"，界面元素出现时像贴上去的。
+   * @constraint 只用在短距离位移和小尺寸缩放上。over-scroll 到 1.05 的设计
+   *      在大面积元素上会明显晃眼，卡片弹出不要超过 2%。
+   */
+  --spring: linear(
+    0, 0.045, 0.17, 0.331, 0.5, 0.655, 0.786, 0.889, 0.963, 1.012, 1.037, 1.045,
+    1.038, 1.024, 1.009, 0.999, 0.995, 0.996, 1
+  );
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+
   --font-sans:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Noto Sans SC', 'PingFang SC',
     'Hiragino Sans GB', 'Microsoft YaHei', Roboto, sans-serif;
+  /* 只在界面页的游戏文本上用，见文件头的 @why */
+  --font-pixel: 'Unifont UI', ui-monospace, monospace;
   --font-mono:
     ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, 'Liberation Mono',
     monospace;
