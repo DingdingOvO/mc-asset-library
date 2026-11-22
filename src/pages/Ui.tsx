@@ -604,12 +604,10 @@ function Workshop({ version }: { version: string }) {
             onClick={() => setTrayOpen((value) => !value)}
           >
             <b>物品</b>
-            <em>{shown.length} 件可拖</em>
-            {held && (
-              <em>
-                · 手上 {nameOf(held.id)} ×{held.count}
-              </em>
-            )}
+            {/* @why 报全量匹配数而不是 shown.length：后者是 120 的截断上限，
+                搜索"石"时明明有 40 件也显示 120。 */}
+            <em>{filtered.length} 件</em>
+            {held && <em>· 手上 ×{held.count}</em>}
             <i aria-hidden="true">{trayOpen ? '▾' : '▴'}</i>
           </button>
 
