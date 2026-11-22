@@ -96,7 +96,7 @@ export function Toolbar(props: ToolbarProps) {
           </button>
         </div>
 
-        <div className="workbench__group" role="group" aria-label="缩放">
+        <div className="workbench__group workbench__group--zoom" role="group" aria-label="缩放">
           {SCALES.map((value) => (
             <button
               key={value}
@@ -109,18 +109,16 @@ export function Toolbar(props: ToolbarProps) {
           ))}
         </div>
 
-        <div className="workbench__group" role="group" aria-label="标题语言">
-          {(['zh', 'en'] as const).map((value) => (
-            <button
-              key={value}
-              type="button"
-              className={`chip${lang === value ? ' chip--on' : ''}`}
-              onClick={() => onLang(value)}
-            >
-              {value === 'zh' ? '中文' : 'EN'}
-            </button>
-          ))}
-        </div>
+        {/* @why 一个按钮循环切换，而不是两个按钮并排：窄屏上「中文 / EN」占两格，
+            换来的只是省一次点击，却把「导出」挤到下一行去。 */}
+        <button
+          type="button"
+          className="chip"
+          onClick={() => onLang(lang === 'zh' ? 'en' : 'zh')}
+          title="切换容器标题语言"
+        >
+          {lang === 'zh' ? '中文' : 'EN'}
+        </button>
       </div>
 
       <div className="workbench__actions">

@@ -16,6 +16,8 @@ export function StatePanel({
   lang,
   onChange,
   onClose,
+  onClone,
+  onRemove,
 }: {
   node: ContainerNode
   def: ContainerDef
@@ -23,6 +25,12 @@ export function StatePanel({
   lang: 'zh' | 'en'
   onChange: (key: string, value: number | boolean | string) => void
   onClose: () => void
+  /**
+   * @why 复制/删除在手机上没有别的地方可放：容器上方的浮动工具条在窄屏会顶出
+   *      可视区（画布只有 220–440px 高），只能挂在面板头部这一行里。
+   */
+  onClone?: () => void
+  onRemove?: () => void
 }) {
   const value = (control: ContainerControl) => node.params[control.key] ?? control.default
   /**
@@ -43,6 +51,16 @@ export function StatePanel({
           <span className="state__title">{def.name} · 状态</span>
           <span className="state__chevron">{open ? '收起' : `${def.controls.length} 项`}</span>
         </button>
+        {onClone && (
+          <button type="button" className="state__act" onClick={onClone} title="复制这个容器">
+            复制
+          </button>
+        )}
+        {onRemove && (
+          <button type="button" className="state__act state__act--danger" onClick={onRemove} title="删除这个容器">
+            删除
+          </button>
+        )}
         <button type="button" className="state__close" onClick={onClose} aria-label="关闭">
           ×
         </button>

@@ -1,8 +1,9 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { SearchBox } from '@/components/SearchBox'
 import { McTooltip, type TipState } from '@/components/McTooltip'
 import { SiteTip, type SiteTipState } from '@/components/SiteTip'
+import { ICON_PIXELS, ensureIcon, iconKey, iconUrl } from '@/lib/itemIcon'
 import { BACKDROPS as EXPORT_BACKDROPS, type ExportBackdrop } from '@/lib/containerRender'
 import { loadContainers, type ContainerDef, type EffectName } from '@/lib/containers'
 import { defaultParams } from '@/lib/layerRender'
@@ -59,6 +60,35 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]['id']
 
+/**
+ * 手持条上的小图标。
+ *
+ * @why 复用物品栏的同一份图标缓存（`ICON_PIXELS` 键），不另开一张位图：
+ *      浮条和格子里显示的必须是同一张图，否则同一件物品在两处颜色会差一点
+ *      （两次渲染的缩放取整不同）。
+ */
+function HeldIcon({ version, id, texture }: { version: string; id: string; texture?: string }) {
+  const key = iconKey(version, id, ICON_PIXELS)
+  const [url, setUrl] = useState<string | null>(() => iconUrl(key))
+
+  useEffect(() => {
+    const hit = iconUrl(key)
+    if (hit) {
+      setUrl(hit)
+      return
+    }
+    let alive = true
+    void ensureIcon(version, id, texture ?? '', ICON_PIXELS).then(() => {
+      if (alive) setUrl(iconUrl(key))
+    })
+    return () => {
+      alive = false
+    }
+  }, [key, version, id, texture])
+
+  return url ? <img className="held-bar__icon" src={url} alt="" draggable={false} /> : null
+}
+
 function UiBody({ version }: { version: string }) {
   const [params, setParams] = useSearchParams()
   const raw = params.get('view')
@@ -105,11 +135,22 @@ function Workshop({ version }: { version: string }) {
   const items = useAsync(`items:${version}`, () => loadItems(version))
 
   const { workspace: state, dispatch, undo, redo, canUndo, canRedo } = useWorkspace()
-  // @why 手机上 3 倍放大的容器比屏幕宽得多，默认降到 2 倍，少滚一点
-  // @why 默认 2 倍：3 倍下三行箱子是 504×528，常见笔记本的可视画布只有 420 高，
-  //      一放进来就要滚动，看起来像"面板被切了"。需要看清细节时手动切 3/4。
-  const [scale, setScale] = useState<number>(2)
+  /**
+   * 容器缩放倍率。
+   * @why 默认值按视口宽度分档：宽屏画布高 700+，3 倍下三行箱子 528 高正好装得下，
+   *      2 倍反而显得画面缩在角落；窄屏只有 2 倍才放得下 176 宽的容器。
+   *      取一次初始值即可，之后由用户点角上的倍率按钮决定。
+   */
+  const [scale, setScale] = useState<number>(() =>
+    typeof window !== 'undefined' && window.innerWidth >= 1200 ? 3 : 2,
+  )
   const [held, setHeld] = useState<PlacedItem | null>(null)
+  /**
+   * 手机上物品区是底部抽屉。
+   * @why 默认收起：一打开页面时用户的第一件事是摆容器，不是挑物品；抽屉收起
+   *      状态仍然露出把手和一行物品，随时能拉开。桌面上这个 state 不影响布局。
+   */
+  const [trayOpen, setTrayOpen] = useState(false)
   /** 输入框里的原始字符串：允许中途为空，提交时才钳到 1..99 */
   const [stackText, setStackText] = useState('64')
   const [selected, setSelected] = useState<string | null>(null)
@@ -118,6 +159,8 @@ function Workshop({ version }: { version: string }) {
   // @why 默认中文：站点是给中文用户做视频用的。做官方截图还原时切回英文原版
   const [lang, setLang] = useState<'zh' | 'en'>('zh')
   const [busy, setBusy] = useState<string | null>(null)
+  /** 画布滚动容器：新增容器后用它把新节点滚进视野 */
+  const stageRef = useRef<HTMLDivElement>(null)
   const [note, setNote] = useState<string | null>(null)
   /**
    * 两种悬停提示分开存：`slotTip` 画在容器里（原版九宫格），
@@ -151,6 +194,38 @@ function Workshop({ version }: { version: string }) {
     return record
   }, [containers.data])
 
+  /**
+   * 键盘退出路径。
+   * @why 「手上拿着东西」是个隐形状态：没有 Esc 时，桌面用户唯一的退出方式是
+   *      精确点到那条浮条上的「放下」，或者去右侧把数量改成 0。Delete 同理——
+   *      选中容器后除了画布上方那两粒小按钮没有别的删除入口。
+   * @constraint 输入框内一律不接管：数字框里按 Esc 应该只退出输入焦点。
+   */
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      const el = event.target as HTMLElement | null
+      const typing = el && (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable)
+      if (typing) return
+      if (event.key === 'Escape') {
+        if (held) {
+          setHeld(null)
+          event.preventDefault()
+        } else if (selected) {
+          setSelected(null)
+          event.preventDefault()
+        }
+        return
+      }
+      if (event.key === 'Delete' && selected) {
+        dispatch({ type: 'remove', uid: selected })
+        setSelected(null)
+        event.preventDefault()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [held, selected, dispatch])
+
   const itemMap = useMemo(() => {
     const map = new Map<string, Item>()
     for (const item of items.data?.items ?? []) map.set(item.id, item)
@@ -178,6 +253,26 @@ function Workshop({ version }: { version: string }) {
     const uid = nextUid()
     dispatch({ type: 'add', container: id, x: spot.x, y: spot.y, uid, params: defaultParams(def) })
     setSelected(uid)
+    /**
+     * @why 空位是从左上角往后排的，第五个容器可能落在可视区之外——点一下列表
+     *      什么都没出现，看起来像坏了。新容器只要不在视野内就把它滚进来。
+     * @constraint 用 rAF 等一次提交：dispatch 之后 DOM 还是旧的，这时候量
+     *      scrollWidth 拿不到新节点的尺寸。
+     */
+    requestAnimationFrame(() => {
+      const el = stageRef.current
+      if (!el) return
+      const left = spot.x * scale
+      const top = spot.y * scale
+      const right = left + def.width * scale
+      const bottom = top + def.height * scale
+      if (left < el.scrollLeft || right > el.scrollLeft + el.clientWidth) {
+        el.scrollLeft = Math.max(0, left - 16)
+      }
+      if (top < el.scrollTop || bottom > el.scrollTop + el.clientHeight) {
+        el.scrollTop = Math.max(0, top - 16)
+      }
+    })
   }
 
   /**
@@ -427,10 +522,16 @@ function Workshop({ version }: { version: string }) {
               lang={lang}
               onChange={(key, value) => dispatch({ type: 'param', uid: selectedNode.uid, key, value })}
               onClose={() => setSelected(null)}
+              onClone={() => dispatch({ type: 'clone', uid: selectedNode.uid, nextUid: nextUid() })}
+              onRemove={() => {
+                dispatch({ type: 'remove', uid: selectedNode.uid })
+                setSelected(null)
+              }}
             />
           )}
 
-          <div className="workbench__stage">
+          <div className="workbench__canvas">
+          <div className="workbench__stage" ref={stageRef}>
           <Stage
             workspace={state}
             defs={defs}
@@ -441,6 +542,7 @@ function Workshop({ version }: { version: string }) {
             lang={lang}
             selected={selected}
             onSelect={setSelected}
+            onSeed={addContainer}
             onSlotClick={onSlotClick}
             onSlotContext={(uid, slot) => dispatch({ type: 'take', uid, slot })}
             onSlotHover={onSlotHover}
@@ -453,42 +555,107 @@ function Workshop({ version }: { version: string }) {
             onClone={(uid) => dispatch({ type: 'clone', uid, nextUid: nextUid() })}
           />
           </div>
+
+          {/* 手上拿着东西时才出现：它是「第二步还没有反馈」这个问题的唯一答案 */}
+          {held && (
+            <div className="held-bar" role="status">
+              <HeldIcon version={version} id={held.id} texture={textureOf(held.id)} />
+              <span className="held-bar__name">{nameOf(held.id)}</span>
+              <span className="held-bar__count">×{held.count}</span>
+              <span className="held-bar__hint">点格子放下</span>
+              <button type="button" className="held-bar__drop" onClick={() => setHeld(null)}>
+                放下
+              </button>
+            </div>
+          )}
+          {/* 手机上缩放挪到画布角上；桌面上这两条都 display:none，用顶栏那一组 */}
+          <div className="stage__zoom" role="group" aria-label="缩放">
+            {[1, 2, 3, 4].map((value) => (
+              <button
+                key={value}
+                type="button"
+                className={`chip${scale === value ? ' chip--on' : ''}`}
+                onClick={() => setScale(value)}
+              >
+                {value}×
+              </button>
+            ))}
+          </div>
+          {/* @why 窄屏用单键循环而不是四个倍率并排：四个按钮要 130px 宽，
+              390px 的画布上会盖掉容器右上角一整格。缩放不是高频操作，
+              点两下能到目标倍率就够了。 */}
+          <button
+            type="button"
+            className="stage__zoom-btn"
+            onClick={() => setScale(scale >= 4 ? 1 : scale + 1)}
+            title="切换容器缩放倍率"
+          >
+            {scale}×
+          </button>
+          </div>
         </div>
 
-        <aside className="workbench__side workbench__side--right">
-          <h2 className="workbench__section">物品</h2>
-          <SearchBox value={query} onChange={setQuery} placeholder="搜索物品…" />
-          <label className="stack">
-            <span className="stack__label">数量</span>
-            <input
-              className="stack__input"
-              type="number"
-              min={1}
-              max={99}
-              inputMode="numeric"
-              value={stackText}
-              onChange={(event) => setStackText(event.target.value)}
-              onBlur={() => setStackText(String(stack))}
-            />
-            <span className="stack__hint">1–99</span>
-          </label>
-          <p className="workbench__hint workbench__hint--held">
-            {held
-              ? `${nameOf(held.id)} × ${held.count} · 点格子放下，右键清空`
-              : '① 点物品拿在手上　② 点格子放下'}
-          </p>
-          {items.loading && <p className="empty">读取中…</p>}
-          <ItemPalette
-            version={version}
-            items={shown}
-            heldId={held?.id ?? null}
-            onPick={(item) => setHeld({ id: item.id, count: stack })}
-            onDragStart={(event, id) => beginItemDrag(event, id)}
-            onHover={(item, at) =>
-              setPaletteTip(item && at ? { x: at.x, y: at.y, title: item.n || item.id, sub: item.id } : null)
-            }
-            truncated={filtered.length - shown.length}
-          />
+        <aside className={`workbench__side workbench__side--right${trayOpen ? ' is-open' : ''}`}>
+          {/* 手机上物品区是抽屉，把手必须在收起时也可见；桌面上这一条 display:none */}
+          <button
+            type="button"
+            className="workbench__tray-toggle"
+            aria-expanded={trayOpen}
+            onClick={() => setTrayOpen((value) => !value)}
+          >
+            <b>物品</b>
+            <em>{shown.length} 件可拖</em>
+            {held && (
+              <em>
+                · 手上 {nameOf(held.id)} ×{held.count}
+              </em>
+            )}
+            <i aria-hidden="true">{trayOpen ? '▾' : '▴'}</i>
+          </button>
+
+          <div className="workbench__tray">
+            <h2 className="workbench__section">物品</h2>
+            <SearchBox value={query} onChange={setQuery} placeholder="搜索物品…" />
+            <label className="stack">
+              <span className="stack__label">数量</span>
+              <input
+                className="stack__input"
+                type="number"
+                min={1}
+                max={99}
+                inputMode="numeric"
+                value={stackText}
+                onChange={(event) => setStackText(event.target.value)}
+                onBlur={() => setStackText(String(stack))}
+              />
+              <span className="stack__hint">1–99</span>
+            </label>
+            <p className="workbench__hint workbench__hint--held">
+              {held ? '点格子放下 · 右键清空格子' : '点物品拿在手上，再点格子放下'}
+            </p>
+            {items.loading && <p className="empty">读取中…</p>}
+            <div className="workbench__tray-scroll">
+              <ItemPalette
+                version={version}
+                items={shown}
+                heldId={held?.id ?? null}
+                onPick={(item) => {
+                  setHeld({ id: item.id, count: stack })
+                  /**
+                   * @why 手机上选完物品就收起抽屉：这是"选物品 → 放格子"里最关键
+                   *      的一步。抽屉展开时画布只剩 220px，3 行箱子都装不下，
+                   *      用户拿到物品却看不见要放的地方。收起后画布翻倍。
+                   */
+                  if (window.matchMedia('(max-width: 900px)').matches) setTrayOpen(false)
+                }}
+                onDragStart={(event, id) => beginItemDrag(event, id)}
+                onHover={(item, at) =>
+                  setPaletteTip(item && at ? { x: at.x, y: at.y, title: item.n || item.id, sub: item.id } : null)
+                }
+                truncated={filtered.length - shown.length}
+              />
+            </div>
+          </div>
         </aside>
       </div>
 

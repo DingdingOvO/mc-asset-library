@@ -1806,6 +1806,7 @@ button:disabled,
    ============================================================ */
 
 .workbench {
+  --tray-peek: 200px;
   display: flex;
   flex-direction: column;
   height: calc(100dvh - var(--topbar-h));
@@ -1886,7 +1887,11 @@ button:disabled,
 .studio__stage {
   display: grid;
   place-items: center;
-  padding: 24px;
+  padding: 18px;
+  /* @constraint 只滚竖向：横向滚动条会吃掉 15px 宽度，把刚好放得下的预览
+     挤到下一轮换行/横滚，形成宽度抖动。 */
+  overflow-y: auto;
+  overflow-x: hidden;
   background-color: var(--surface-muted);
   background-image: conic-gradient(
     var(--checker) 25%,
@@ -1895,13 +1900,22 @@ button:disabled,
     transparent 0
   );
   background-size: 28px 28px;
-  overflow: auto;
 }
 
 /* @constraint 必须 pixelated：界面是位图放大，插值会把 1px 边框糊成 2px 灰线 */
 .studio__canvas {
   image-rendering: pixelated;
   filter: drop-shadow(0 10px 28px rgb(0 0 0 / 18%));
+  /* @constraint 只允许缩小不允许放大：书页 192 宽在 2 倍下是 384，
+     390px 手机减去内边距只剩 362，不夹紧就会横滚——而横向滚动条自己又吃掉
+     15px 宽度，第二次挤压又让竖向滚动条出现，最后两个方向都在滚。 */
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  /* @constraint 高度也要夹：手机上画布区只有 350px 高，书页 2 倍是 384，
+     不夹就要滚一屏才能看到页脚。object-fit 保证盒子变了位图不变形。 */
+  object-fit: contain;
 }
 
 .studio__select,
@@ -1990,7 +2004,7 @@ button:disabled,
 
   .studio__stage {
     order: -1;
-    padding: 14px;
+    padding: 8px;
   }
 
   .studio__panel {
@@ -2089,6 +2103,26 @@ button:disabled,
   padding: 10px;
   background: var(--surface);
   overflow: auto;
+  /* @why 细滚动条：原生 15px 灰槽在 236px 的侧栏里占掉 6%，而且和物品格
+     的 2px 间隙形成两个视觉尺度。8px + 圆角与卡片圆角同族。 */
+  scrollbar-width: thin;
+  scrollbar-color: var(--border-strong) transparent;
+}
+
+.workbench__side::-webkit-scrollbar,
+.workbench__tray-scroll::-webkit-scrollbar {
+  width: 8px;
+}
+
+.workbench__side::-webkit-scrollbar-thumb,
+.workbench__tray-scroll::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: var(--border-strong);
+}
+
+.workbench__side::-webkit-scrollbar-track,
+.workbench__tray-scroll::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .workbench__side--left {
@@ -2097,6 +2131,122 @@ button:disabled,
 
 .workbench__side--right {
   border-left: 1px solid var(--border);
+}
+
+/* 手机物品抽屉的把手。桌面上物品区是常驻一栏，不需要把手，直接隐藏 */
+.workbench__tray-toggle {
+  display: none;
+  flex: none;
+  align-items: center;
+  gap: 8px;
+  height: 42px;
+  padding: 0 12px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-muted);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.workbench__tray-toggle b {
+  font-weight: 650;
+}
+
+.workbench__tray-toggle em {
+  font-style: normal;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.workbench__tray-toggle i {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-style: normal;
+  transition: transform 0.2s ease;
+}
+
+.workbench__side--right.is-open .workbench__tray-toggle i {
+  transform: rotate(180deg);
+}
+
+.workbench__tray {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* 物品网格的滚动区。桌面和手机共用：桌面侧栏固定宽、抽屉固定高，
+   两种情况都需要网格自己滚而不是把父容器撑破。 */
+.workbench__tray-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* 手持条：贴在画布底部中间。
+   @why 「点物品拿在手上、再点格子放下」这个模型最大的问题是第二半没有反馈——
+        拿起来之后界面没有任何变化，用户不知道手上有没有东西、拿的是什么、
+        拿了几个。这条浮条就是这个状态的唯一显示位置，顺带能点它放下。 */
+.held-bar {
+  position: absolute;
+  z-index: 4;
+  left: 50%;
+  bottom: 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100% - 24px);
+  padding: 5px 6px 5px 8px;
+  border: 1px solid var(--border-strong);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  box-shadow: 0 6px 20px rgb(0 0 0 / 12%);
+  backdrop-filter: blur(6px);
+  transform: translateX(-50%);
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.held-bar__icon {
+  width: 22px;
+  height: 22px;
+  image-rendering: pixelated;
+}
+
+.held-bar__name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.held-bar__count {
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.held-bar__hint {
+  color: var(--text-muted);
+}
+
+.held-bar__drop {
+  padding: 3px 9px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text);
+  font-family: inherit;
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.held-bar__drop:hover {
+  border-color: var(--accent);
 }
 
 .workbench__section {
@@ -2166,14 +2316,11 @@ button:disabled,
   background: var(--accent-muted);
 }
 
+/* @why 不再给「快捷栏」铺 accent 底色：它是一排按钮里唯一染色的一格，
+   看起来像"已选中"，用户会以为点了它才生效。常用的容器交给画布空态的
+   起手按钮去引导，列表里所有条目一视同仁。 */
 .palette__item--hero {
-  background: var(--accent);
-  color: var(--accent-contrast);
-}
-
-.palette__item--hero:hover {
-  background: var(--accent);
-  border-color: var(--accent-contrast);
+  font-weight: 650;
 }
 
 .palette__name {
@@ -2189,11 +2336,6 @@ button:disabled,
   color: var(--text-muted);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
-}
-
-.palette__item--hero .palette__meta {
-  color: inherit;
-  opacity: 0.8;
 }
 
 /* 数量输入 */
@@ -2332,6 +2474,14 @@ button:disabled,
   min-height: 0;
 }
 
+.workbench__canvas {
+  position: relative;
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
 .workbench__stage {
   flex: 1;
   min-width: 0;
@@ -2355,23 +2505,21 @@ button:disabled,
   justify-content: start;
 }
 
+/* 空画布：整块棋盘格就是画布，不再画一个"虚线小框"。
+   @why 原来是一个 168px 高的虚线框贴在左上角，四周还是同样的网格底，
+        看起来像画布之外还有画布。空态要回答的是"我现在能做什么"，
+        所以直接铺满可视区 + 三个起手容器。 */
 .stage__empty {
-  /* @constraint 不能写 inset: 24px —— 画布最小高度由内容撑出来（3 倍缩放下
-     一千多像素），居中会落到首屏之外，用户看到的就是一张空白网格。 */
   position: absolute;
-  left: 24px;
-  right: 24px;
-  top: 24px;
-  height: 168px;
+  inset: 0;
   display: grid;
   place-content: center;
-  gap: 4px;
-  padding: 16px;
+  justify-items: center;
+  gap: 6px;
+  padding: 24px;
   text-align: center;
-  font-size: 12.5px;
+  font-size: 13px;
   color: var(--text-muted);
-  border: 1px dashed var(--border-strong);
-  border-radius: var(--radius-lg);
   pointer-events: none;
 }
 
@@ -2380,14 +2528,63 @@ button:disabled,
 }
 
 .stage__empty-title {
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 600;
   color: var(--text);
+}
+
+.stage__seeds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+  margin-top: 10px;
+  pointer-events: auto;
+}
+
+.stage__seed {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 88px;
+  padding: 7px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: border-color 0.15s ease, transform 0.15s ease;
+}
+
+.stage__seed span {
+  font-size: 10.5px;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.stage__seed:hover {
+  border-color: var(--accent);
+  transform: translateY(-1px);
 }
 
 .stage__node {
   position: absolute;
   touch-action: none;
+  /* @why 手型暗示可拖动：容器本身长得像一张静态截图，没有任何"这是画布上的
+     一个对象"的视觉线索。真去拖槽位又是在放物品，所以只给面板空白处 move。 */
+  cursor: move;
+}
+
+.stage__node .mc-slot {
+  cursor: pointer;
+}
+
+/* 画布角上的缩放控件。桌面上缩放常驻顶栏，这两个都不需要 */
+.stage__zoom,
+.stage__zoom-btn {
+  display: none;
 }
 
 .stage__node--active {
@@ -2537,6 +2734,29 @@ button:disabled,
   font-size: 11px;
   font-weight: 400;
   color: var(--text-muted);
+}
+
+/* 面板头部的复制/删除。桌面上容器旁边的浮动条也有这两个动作，这里常驻不影响 */
+.state__act {
+  flex: none;
+  padding: 2px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.state__act:hover {
+  border-color: var(--accent);
+  color: var(--text);
+}
+
+.state__act--danger:hover {
+  border-color: var(--danger, #c0392b);
+  color: var(--danger, #c0392b);
 }
 
 .state__close {
@@ -2877,10 +3097,22 @@ button:disabled,
 
   .workbench__bar {
     gap: 5px;
-    padding: 7px 10px;
-    flex-wrap: nowrap;
-    flex-direction: column;
-    align-items: stretch;
+    padding: 6px 8px;
+    /* @why 手机顶栏改成一行自然折行，不再强制两行。去掉缩放组（挪到画布角上）、
+       语言合成一个开关之后，392px 宽刚好放得下「撤销/重做/中文 | 导出/导入/清空」，
+       省下的 44px 全部还给画布。 */
+    flex-wrap: wrap;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+  }
+
+  .workbench__spacer {
+    display: none;
+  }
+
+  .workbench__group--zoom {
+    display: none;
   }
 
   /* @constraint 手机顶栏只能是两行：一行放撤销/缩放/语言，一行放导出/导入/清空。
@@ -2915,9 +3147,11 @@ button:disabled,
 
   .workbench__body {
     grid-template-columns: minmax(0, 1fr);
-    /* 三行都给定高度：容器条按内容、画布 44vh、剩下全给物品区。
-       用 auto 的话物品区会被挤到屏幕外，要滚到底才能选物品。 */
-    grid-template-rows: auto minmax(220px, 44vh) minmax(150px, 1fr);
+    /* @why 三行按「容器条按内容 / 画布吃掉剩余 / 物品抽屉自己定高」分。
+       以前给画布写死 minmax(220px, 44vh)，但那是把 44% 的视口钉给了一块
+       空棋盘格，物品抽屉只剩 150px——连第一行图标都露不出来，手机上等于
+       选不了物品。现在画布是 1fr，抽屉高度由它自己的开合状态决定。 */
+    grid-template-rows: auto minmax(0, 1fr) auto;
   }
 
   /* @constraint 状态面板在手机上必须回到普通流。它是 absolute + bottom，
@@ -2940,6 +3174,13 @@ button:disabled,
     border-bottom: 1px solid var(--border);
     overflow-x: auto;
     overflow-y: hidden;
+    /* @why 隐藏横滚条：这一条只有 56px 高，原生滚动条会吃掉 8px 并且
+       画出一条和容器 chip 争视觉的灰槽。触摸横滑 + 两侧留白已经够指示可滚。 */
+    scrollbar-width: none;
+  }
+
+  .workbench__side--left::-webkit-scrollbar {
+    display: none;
   }
 
   /* @why 分组标题不能 display:none。横滚条里有 24 个容器，去掉标题就是一整条
@@ -2979,11 +3220,98 @@ button:disabled,
     padding: 10px;
   }
 
+  /* 物品区在手机上变成底部抽屉：收起只留一行把手，展开到半屏。
+     @why 抽屉而不是固定分区：选物品和放格子是同一个动作的两半，中间隔着
+           一整块画布时，用户必须来回滚 400px。抽屉收起时画布最大化，
+           展开时物品和画布同屏可见。 */
   .workbench__side--right {
+    height: var(--tray-peek);
+    padding: 0;
     border-left: 0;
     border-top: 1px solid var(--border);
-    min-height: 0;
-    overflow: auto;
+    overflow: hidden;
+    transition: height 0.22s cubic-bezier(0.32, 0.72, 0.28, 1);
+  }
+
+  /* @why 上限 360 而不是 56vh：844 高的机器上 56vh 是 472，画布只剩 226，
+     展开后连三行箱子的四分之一都看不到。360 能让画布留下 360+，选物品时
+     目标格子还在视野里。 */
+  .workbench__side--right.is-open {
+    height: min(48vh, 360px);
+  }
+
+  .workbench__tray-toggle {
+    display: flex;
+  }
+
+  .workbench__tray {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-content: start;
+    gap: 6px;
+    padding: 8px 10px 10px;
+  }
+
+  /* 搜索框和数量并排：两行并一行，抽屉收起时刚好露出第一排物品 */
+  .workbench__tray > .search {
+    grid-column: 1;
+  }
+
+  .workbench__tray > .stack {
+    grid-column: 2;
+  }
+
+  .workbench__tray > .stack .stack__label,
+  .workbench__tray > .stack .stack__hint {
+    display: none;
+  }
+
+  .workbench__tray-scroll {
+    grid-column: 1 / -1;
+  }
+
+  /* @constraint 手机上抽屉里不能再重复「物品」标题和操作提示：把手已经写了
+     「物品 N 件」，提示条在画布上也有。这两行各 20px，正好把第一行物品挤出
+     收起高度之外。 */
+  .workbench__tray > .workbench__section,
+  .workbench__tray > .workbench__hint--held {
+    display: none;
+  }
+
+  /* 缩放挪到画布角上：它不是高频操作，不该占顶栏一格 */
+  .stage__zoom-btn {
+    display: flex;
+    position: absolute;
+    z-index: 4;
+    right: 8px;
+    top: 8px;
+    align-items: center;
+    justify-content: center;
+    min-width: 40px;
+    height: 30px;
+    padding: 0 8px;
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--surface) 94%, transparent);
+    color: var(--text);
+    font-family: inherit;
+    font-size: 12px;
+    font-weight: 650;
+    font-variant-numeric: tabular-nums;
+    box-shadow: 0 4px 14px rgb(0 0 0 / 10%);
+    backdrop-filter: blur(6px);
+    cursor: pointer;
+  }
+
+  /* @constraint 手机上容器上方的「复制/删除」浮条必须去掉：画布只有 220–440px
+     高，浮条挂在容器 top 之上会顶出可视区；而且它和状态面板头部的操作重复。
+     这两个动作挪进状态面板头部（见 StatePanel 的 onClone/onRemove）。 */
+  .stage__tools {
+    display: none;
+  }
+
+  .held-bar {
+    bottom: 10px;
   }
 
   .state {
@@ -2996,8 +3324,11 @@ button:disabled,
     border-right: 0;
   }
 
+  /* @constraint 手机上格子仍要 34px，不能改成 minmax(78px, 1fr)：那会把一行
+     撑成 4 格，120 件物品要滚 30 行，选个方块滚到手指抽筋。 */
   .item-grid {
-    grid-template-columns: repeat(auto-fill, minmax(78px, 1fr));
+    grid-template-columns: repeat(auto-fill, 34px);
+    justify-content: start;
   }
 }
 

@@ -15,6 +15,8 @@ interface StageProps {
   lang: 'zh' | 'en'
   selected: string | null
   onSelect: (uid: string | null) => void
+  /** 空画布上的「起手容器」：点一下就摆进来，省掉去左栏找的动作 */
+  onSeed?: (id: string) => void
   onSlotClick: (uid: string, slot: number) => void
   onSlotContext: (uid: string, slot: number) => void
   onSlotHover: (uid: string, slot: number | null, at: { x: number; y: number } | null) => void
@@ -23,6 +25,20 @@ interface StageProps {
   onRemove: (uid: string) => void
   onClone: (uid: string) => void
 }
+
+/**
+ * 空画布上的三个起手容器。
+ *
+ * @why 空白页最贵的一步是"决定先放什么"。快捷栏、箱子、熔炉覆盖了绝大多数
+ *      视频场景（做背包、做仓储、做烧炼），把它们做成画布上的按钮，
+ *      从打开页面到看见第一个容器从"找左栏 → 点一下"缩成一次点击。
+ * @constraint 只放 id：这些容器可能在别的版本里不存在，渲染时按 defs 过滤。
+ */
+const SEEDS: { id: string; zh: string; note: string }[] = [
+  { id: 'hotbar', zh: '快捷栏', note: '9 格 · 做手持' },
+  { id: 'chest_3', zh: '箱子 · 3 行', note: '27 格 · 做仓储' },
+  { id: 'furnace', zh: '熔炉', note: '燃烧进度可调' },
+]
 
 export function Stage({
   workspace,
@@ -34,6 +50,7 @@ export function Stage({
   lang,
   selected,
   onSelect,
+  onSeed,
   onSlotClick,
   onSlotContext,
   onSlotHover,
@@ -46,9 +63,16 @@ export function Stage({
   const [dragging, setDragging] = useState(false)
   const [guides, setGuides] = useState<{ x: number | null; y: number | null }>({ x: null, y: null })
 
+  /**
+   * 画布内容包围盒 + 120 GUI 像素余量。
+   *
+   * @constraint 起点必须是 0 而不是 640×420。写死 640 会让画布在 2 倍缩放下
+   *      至少有 1280 宽——桌面上 1000px 的画布刚放一个箱子就长出横向滚动条，
+   *      用户以为是布局错了。真正的"铺满"由 `.stage { min-width: 100% }` 提供。
+   */
   const canvasSize = useMemo(() => {
-    let width = 640
-    let height = 420
+    let width = 0
+    let height = 0
     for (const node of workspace.nodes) {
       const def = defs.get(node.container)
       if (!def) continue
@@ -73,9 +97,22 @@ export function Stage({
     >
       {workspace.nodes.length === 0 && (
         <div className="stage__empty">
-          <p className="stage__empty-title">画布是空的</p>
-          <p>先选一个容器放进来</p>
-          <p>点格子摆物品，右上角导出</p>
+          <p className="stage__empty-title">画布还是空的</p>
+          <p>先摆一个容器进来，再往格子里放物品</p>
+          <div className="stage__seeds">
+            {SEEDS.filter((seed) => defs.has(seed.id)).map((seed) => (
+              <button
+                key={seed.id}
+                type="button"
+                className="stage__seed"
+                onPointerDown={(event) => event.stopPropagation()}
+                onClick={() => onSeed?.(seed.id)}
+              >
+                {seed.zh}
+                <span>{seed.note}</span>
+              </button>
+            ))}
+          </div>
         </div>
       )}
 

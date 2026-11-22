@@ -67,16 +67,23 @@ export function ContainerPalette({ defs, loading, onAdd, onHover }: ContainerPal
                 onPointerEnter={(event) => {
                   const box = event.currentTarget.getBoundingClientRect()
                   onHover?.(
-                    { title: def.name, note: `${def.width}×${def.height} · ${def.slots.length} 槽`, sub: def.screen },
+                    {
+                      title: def.name,
+                      note: def.controls.length
+                        ? `${def.controls.length} 项可变状态`
+                        : `${def.slots.length} 个格子`,
+                      sub: def.screen,
+                    },
                     { x: box.right, y: box.top },
                   )
                 }}
                 onPointerLeave={() => onHover?.(null, null)}
               >
                 <span className="palette__name">{def.name}</span>
-                <span className="palette__meta">
-                  {def.width}×{def.height}
-                </span>
+                {/* @constraint 这里不能写 def.slots.length：槽位数组含玩家背包的
+                    36 格，「箱子（1 行）」会显示成 45 槽。行数已经在名字里了，
+                    这里只标注"能调状态"，没有可变项的容器就空着。 */}
+                {def.controls.length > 0 && <span className="palette__meta">可调</span>}
               </button>
             ))}
           </section>
