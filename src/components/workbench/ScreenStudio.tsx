@@ -264,8 +264,12 @@ export function ScreenStudio({ version, kind }: { version: string; kind: ScreenK
    *      四周全是棋盘格，而手机上 3 倍又刚好超出可视宽度被 CSS 夹成 2.9 倍——
    *      非整数倍正是把 1px 边框糊成 2px 的元凶。算出来的倍数一定落得下，
    *      CSS 那两道 max-width/max-height 就只是兜底，不再是常态。
-   * @constraint 上限 8：再大只是白烧显存，人眼在 8 倍点阵上已经看不到更多细节。
+   * @constraint 上限 5：这不是性能限制，是**观感**限制。界面里的字只有 8 GUI
+   *      像素高，撑到 8 倍时一个字 64 屏幕像素，点阵每一格都变成 8×8 的实心方块，
+   *      笔画粘成一团黑，看起来像字体坏了。5 倍与原版 GUI scale 3–5 的观看距离
+   *      相当，也不会让 96 宽的告示牌在 1440 屏上缩成一张邮票。
    */
+
   useLayoutEffect(() => {
     const stage = stageRef.current
     if (!stage) return
@@ -277,7 +281,7 @@ export function ScreenStudio({ version, kind }: { version: string; kind: ScreenK
       const height = stage.clientHeight - padY
       if (width <= 0 || height <= 0) return
       const fit = Math.floor(Math.min(width / gui.width, height / gui.height))
-      setPreviewScale(Math.max(1, Math.min(fit, 8)))
+      setPreviewScale(Math.max(1, Math.min(fit, 5)))
     }
     measure()
     const observer = new ResizeObserver(measure)

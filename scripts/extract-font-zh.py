@@ -145,9 +145,14 @@ def main():
                 chars.add(ch)
 
     if full:
-        # @why 只多收这三块：表意文字、中日韩标点、全角符号。Emoji 与扩展 B
+        # @why 只多收这几块：表意文字、中日韩标点、全角字母符号。Emoji 与扩展 B
         #      区的生僻字 unifont 里可能是空白格，收进来只增加体积。
-        for start, end in ((0x3000, 0x303F), (0x4E00, 0x9FFF)):
+        # @constraint 全角区（FF00–FF5F）不能漏：中文输入法打出来的「，」「：」
+        #      「（」是 U+FF0C 不是 U+3001，只收 3000 区的话，告示牌和书页里
+        #      每一个中文逗号都会落成问号——用户看到的是一整页 '?'。
+        # @constraint 不要加 0x2010–0x2027：unifont 这份 no_pua 版本里没有
+        #      半角破折号与弯引号（它们只有全角形态），加进来只会多一行缺字警告。
+        for start, end in ((0x3000, 0x303F), (0x4E00, 0x9FFF), (0xFF00, 0xFF5F)):
             for code in range(start, end + 1):
                 chars.add(chr(code))
 

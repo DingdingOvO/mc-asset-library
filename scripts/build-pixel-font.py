@@ -61,7 +61,15 @@ def wanted_codepoints():
 
 
 def read_hex(zip_path):
-    """读 hex 文件成 {码点: 32 位十六进制串}。"""
+    """
+    读 hex 文件成 {码点: (行位图, 列数)}。
+
+    @constraint 必须同时接受 64 与 32 个十六进制字符两种行长。unifont 的半角
+          字形（ASCII、拉丁、制表符）是 **8 列**，每行 2 个 hex 字符，整条 32；
+          全角字形（汉字、假名）才是 16 列、64 个字符。只认 64 会把 12582 个
+          半角字形全部丢掉——字体里于是只有中文，英文、数字、标点全 fallback
+          到系统无衬线，一个输入框里两套字形，字距还差一倍。
+    """
     with zipfile.ZipFile(zip_path) as archive:
         names = [name for name in archive.namelist() if name.endswith('.hex')]
         if not names:
@@ -71,27 +79,37 @@ def read_hex(zip_path):
     table = {}
     for line in raw.splitlines():
         head, _, bits = line.partition(':')
-        if len(bits) != 64:
+        if len(bits) == 64:
+            cols = 16
+        elif len(bits) == 32:
+            cols = 8
+        else:
             continue
         try:
-            table[int(head, 16)] = bits
+            code = int(head, 16)
         except ValueError:
             continue
+        table[code] = (bits, cols)
     return table
 
 
-def span(bits):
+def rows_of(bits, cols):
+    """每行取整成 int，位宽按列数来"""
+    step = cols // 4
+    return [int(bits[i * step:(i + 1) * step], 16) for i in range(16)]
+
+
+def span(rows, cols):
     """左右裁掉全透明列，返回 (left, right)；与 UnihexProvider 的规则一致。"""
-    rows = [int(bits[i * 4:(i + 1) * 4], 16) for i in range(16)]
-    left, right = 0, 15
-    while left <= right and all((row >> (15 - left)) & 1 == 0 for row in rows):
+    left, right = 0, cols - 1
+    while left <= right and all((row >> (cols - 1 - left)) & 1 == 0 for row in rows):
         left += 1
-    while right >= left and all((row >> (15 - right)) & 1 == 0 for row in rows):
+    while right >= left and all((row >> (cols - 1 - right)) & 1 == 0 for row in rows):
         right -= 1
     return left, right
 
 
-def draw(pen, bits, left, right):
+def draw(pen, rows, cols, left, right):
     """
     把点阵画成轮廓。
 
@@ -99,17 +117,16 @@ def draw(pen, bits, left, right):
          大约 40 个矩形，不合并是 150+ 个小方块——轮廓点数差三倍，woff2 体积
          和首次排版耗时都跟着涨。
     """
-    rows = [int(bits[i * 4:(i + 1) * 4], 16) for i in range(16)]
     for index, row in enumerate(rows):
         y_bottom = ASCENT - 1 - index
         y_top = y_bottom + 1
         x = left
         while x <= right:
-            if (row >> (15 - x)) & 1 == 0:
+            if (row >> (cols - 1 - x)) & 1 == 0:
                 x += 1
                 continue
             start = x
-            while x <= right and (row >> (15 - x)) & 1:
+            while x <= right and (row >> (cols - 1 - x)) & 1:
                 x += 1
             pen.moveTo((start, y_bottom))
             pen.lineTo((x, y_bottom))
@@ -153,15 +170,16 @@ def main():
             name = f'uni{cp:04X}'
         else:
             name = f'uni{cp:04X}'
-        bits = table[cp]
-        left, right = span(bits)
+        bits, cols = table[cp]
+        rows = rows_of(bits, cols)
+        left, right = span(rows, cols)
         pen = TTGlyphPen(None)
         if right >= left:
-            draw(pen, bits, left, right)
-        wide = (right - left + 1) > 8
-        advance = 16 if wide else 8
-        # @why 拉丁半角字形的左侧留白按 span 左边界走，否则 'i' 和 'm'
-        #      会挤在一起——点阵本身带留白，但 advance 只有 8，得让它居中
+            draw(pen, rows, cols, left, right)
+        # @why advance 由**点阵列数**决定，不是由墨迹宽度决定：半角格就是 8，
+        #      全角格就是 16。按墨迹宽度猜会让 'M'（墨迹 7 列）拿到 16 的
+        #      advance，一个单词里字距忽宽忽窄——那正是「字体烂」的来源。
+        advance = cols
         offset = max(0, (advance - (right - left + 1)) // 2)
         glyphs[name] = pen.glyph()
         if offset:

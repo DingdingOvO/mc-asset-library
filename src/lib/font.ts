@@ -181,6 +181,14 @@ function zhTile(font: GlyphFont, code: number, color: string): HTMLCanvasElement
   const span = glyph.right - glyph.left + 1
   if (span <= 0) return null
 
+  /**
+   * 位图按**点阵原分辨率**存 16 行，缩到 8 像素高交给 drawImage 去做。
+   *
+   * @why 一度试过在这里就合并成 8 行（2×2 任一为实则实），结果是每个汉字都
+   *      变成一枚 8×8 的实心黑块——中文笔画密度本来就高，二值缩小只剩"有/无"
+   *      两态，笔画之间那半像素的空隙被吃掉，整字粘死。保留 16 行、用双线性
+   *      缩小（见 drawText），得到的是四级灰阶：笔画细了，字与字之间重新分得开。
+   */
   const canvas = document.createElement('canvas')
   canvas.width = span
   canvas.height = 16
@@ -270,7 +278,15 @@ export function drawText(
         // @constraint 目标高必须是 CELL(8) 而不是 16：点阵占 8 个 GUI 像素，
         //      与 ascii.png 的 8px 字高对齐，汉字和数字才在同一基线上。
         //      缩放在这里发生，落在设备像素上是 8×ratio，ratio=2 时正好 1:1。
+        /**
+         * @constraint 只有这一处临时开插值。16→8 是 2:1 缩小，nearest 会让每个
+         *      汉字抽掉一半行、变成实心黑块；双线性得到四级灰阶，笔画能分开。
+         *      画完立刻关掉，方块的像素纹理绝不能插值。
+         */
+        ctx.save()
+        ctx.imageSmoothingEnabled = true
         ctx.drawImage(tile, cursor, y, guiW, CELL)
+        ctx.restore()
         cursor += glyph.advance
         continue
       }

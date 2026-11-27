@@ -1884,6 +1884,19 @@ button:disabled,
      行不绘制」在 240px 内要折成三行，读起来像打散的词。 */
   grid-template-columns: 288px minmax(0, 1fr);
   min-height: 0;
+  /**
+   * 整个界面编辑区用点阵字。
+   *
+   * @why 面板上的「木种」「四行文字」「染色」和画布里的字是同一件事的两端：
+   *      一边是你敲进去的标签，一边是画出来的结果。面板走系统无衬线时，
+   *      页面像一张网页表单贴在一块游戏画布旁边；换成同一套点阵，字数、
+   *      折行、落点的判断才有参照。
+   * @constraint 字号锁 16px、行高锁 20px。点阵 1 单位 = 1 像素只在这个组合下
+   *      成立，取 13/14px 或 1.4 倍行高都会被重采样成半像素，笔画糊成灰边。
+   */
+  font-family: var(--font-pixel);
+  font-size: 16px;
+  line-height: 20px;
 }
 
 .studio__panel {
@@ -1934,6 +1947,12 @@ button:disabled,
   object-fit: contain;
 }
 
+.studio__select {
+  font-family: var(--font-pixel);
+  font-size: 15px;
+  line-height: 20px;
+}
+
 .studio__select,
 .studio__input,
 .studio__textarea {
@@ -1961,13 +1980,16 @@ button:disabled,
 .studio__textarea {
   font-family: var(--font-pixel);
   font-size: 16px;
-  line-height: 1.3;
+  /* @constraint 行高必须是整数像素：点阵轮廓在 16px 字号下正好 1 单位 = 1 像素，
+     行高取 1.3 会算出 20.8px，第二行起整体落在半像素上，浏览器把每一笔都
+     抗锯齿成灰边——远看就是"糊成一团"。20px 让每行起点都回到网格上。 */
+  line-height: 20px;
   letter-spacing: 0;
 }
 
 .studio__textarea {
   resize: vertical;
-  line-height: 1.3;
+  line-height: 20px;
 }
 
 /* 地图预览可画：十字光标比手型更能说明「按下就是落笔」 */
@@ -2119,7 +2141,33 @@ button:disabled,
   align-items: center;
   gap: 6px;
   color: var(--text);
+  font-family: var(--font-sans);
   font-size: 12.5px;
+}
+
+/**
+ * 说明文字保留系统字体。
+ * @why 这些句子是给操作者看的网页文案，不会被画进游戏画面。16px 点阵下
+ *      「一页最多 13 行，超出会被截掉」要占三行，面板一半高度都在解释自己。
+ */
+.studio .workbench__hint {
+  font-family: var(--font-sans);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+.studio .workbench__section {
+  font-family: var(--font-pixel);
+  font-size: 16px;
+  line-height: 20px;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.studio .btn,
+.studio .chip {
+  font-family: var(--font-pixel);
+  font-size: 15px;
 }
 
 .studio__check span {
