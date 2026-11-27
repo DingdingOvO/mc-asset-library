@@ -158,16 +158,16 @@ function atlas(font: GlyphFont, color: string): HTMLCanvasElement {
 }
 
 /**
- * 单个中文字的位图，**保持点阵原分辨率**（span × 16）。
+ * 单个中文字的位图：**16 行的原始点阵**，一格一像素，不做任何缩放。
  *
- * @why 缩放交给 `drawImage` 在设备像素空间里做，这里绝不预先降采样。
- *      UnihexProvider 的 oversample=2 不是"把 16×16 压成 8×8"——图集里存的
- *      是完整 16×16，绘制时按 1/2 的 GUI 尺寸贴，GPU 采样落在屏幕像素上。
- *      GUI scale 2、DPR 2 时一个汉字正好占 32 个设备像素，16 个点阵列完美
- *      1:2 落位；提前压成 8×8 再放大，等于先丢一半笔画再插值，笔画必然粘连。
+ * @why 这里曾经把 16 行缩到 8 行再画，无论 nearest（抽掉一半行、断笔）还是
+ *      双线性（四级灰阶、笔画发糊）都不对。中文点阵在 8 GUI 像素高时本来就
+ *      密，任何重采样都是在破坏它。正确做法是保留原分辨率，由 drawText 在
+ *      **设备像素坐标**下按整数倍放大——ratio 是偶数时每格正好占 ratio/2 个
+ *      设备像素，笔画 1:1 落位，既不断也不糊。
  *
- * @constraint 输出必须是原始 span 宽，不能顺手裁。裁掉任何一列都会让
- *      `drawImage` 的源宽与 GUI 目标宽比例失衡，字被横向拉斜。
+ * @constraint 宽度必须是 `span`（裁边后的列数），不能是 16：裁掉的左右空白
+ *      若留在图里，绘制时按原宽放大，字就会横向压缩进 guiW，笔画被挤在一起。
  */
 function zhTile(font: GlyphFont, code: number, color: string): HTMLCanvasElement | null {
   const glyph = font.zh.get(code)
@@ -181,14 +181,6 @@ function zhTile(font: GlyphFont, code: number, color: string): HTMLCanvasElement
   const span = glyph.right - glyph.left + 1
   if (span <= 0) return null
 
-  /**
-   * 位图按**点阵原分辨率**存 16 行，缩到 8 像素高交给 drawImage 去做。
-   *
-   * @why 一度试过在这里就合并成 8 行（2×2 任一为实则实），结果是每个汉字都
-   *      变成一枚 8×8 的实心黑块——中文笔画密度本来就高，二值缩小只剩"有/无"
-   *      两态，笔画之间那半像素的空隙被吃掉，整字粘死。保留 16 行、用双线性
-   *      缩小（见 drawText），得到的是四级灰阶：笔画细了，字与字之间重新分得开。
-   */
   const canvas = document.createElement('canvas')
   canvas.width = span
   canvas.height = 16
@@ -216,12 +208,12 @@ function zhTile(font: GlyphFont, code: number, color: string): HTMLCanvasElement
 }
 
 /**
- * 汉字在位图原分辨率下占的 GUI 宽度。
- * @constraint 必须与 advance 同源（advance = floor(span/2) + 1），
+ * 汉字占的 GUI 宽度。
+ * @constraint 必须与 `ZhGlyph.advance` 同源（advance = floor(span/2) + 1），
  *      少算半格两个字的笔画会咬在一起，多算半格中间会开一道缝。
  */
 function zhGuiWidth(glyph: ZhGlyph): number {
-  return Math.max(1, Math.round((glyph.right - glyph.left + 1) / 2))
+  return Math.max(1, Math.floor((glyph.right - glyph.left + 1) / 2))
 }
 
 function parseColor(color: string): [number, number, number] {
@@ -247,8 +239,11 @@ export function textWidth(font: GlyphFont, text: string): number {
 /**
  * 画一行字。坐标是 GUI 像素，(x, y) 是文字**左上角**，与 GuiGraphics.text 一致。
  *
- * @param shadow 原版 text 默认带投影，颜色是原色的 1/4 亮度。信标那种
- *        浅底浅字的标题全靠投影才分得清笔画，所以默认关、需要时开。
+ * @param shadow 原版 text 默认带投影，颜色是原色的 1/4 亮度。信标那种浅底浅字
+ *        的标题全靠投影才分得清笔画，所以默认关、需要时开。
+ * @param ratio  一个 GUI 像素占多少设备像素。**传偶数**才能走清晰路径：
+ *        汉字点阵 16 行要落到 8 GUI 高，只有 ratio 为偶数时每格才占整数个
+ *        设备像素。不传或传奇数时退回 GUI 坐标 + 双线性，笔画会糊。
  */
 export function drawText(
   ctx: CanvasRenderingContext2D,
@@ -258,12 +253,56 @@ export function drawText(
   y: number,
   color = '#404040',
   shadow = false,
+  ratio?: number,
 ): void {
   if (shadow) {
     const [r, g, b] = parseColor(color)
     const dark = `#${[r, g, b].map((v) => Math.floor(v / 4).toString(16).padStart(2, '0')).join('')}`
-    drawText(ctx, font, text, x + 1, y + 1, dark, false)
+    drawText(ctx, font, text, x + 1, y + 1, dark, false, ratio)
   }
+
+  const crisp = ratio !== undefined && ratio >= 2 && ratio % 2 === 0
+
+  /**
+   * 清晰路径：切到设备像素坐标，关掉一切插值，按整数倍贴图。
+   *
+   * @why 这是「字体糊」的真正解法。GUI 坐标下 `drawImage` 把 16 行点阵画进
+   *      8 个 GUI 像素，缩放比恒为 1/2，无论怎么设 flag 都要丢一半行；
+   *      而在设备坐标下，ratio=4 时 16 行对应 32 设备行，每格 2×2，是放大
+   *      而不是缩小，nearest 精确复制，笔画一根不少。
+   * @constraint 只这一次 setTransform，必须 restore：调用方（surface.prepare）
+   *      设的 ratio 矩阵是后续所有绘制的基准。
+   */
+  if (crisp) {
+    const k = ratio / 2
+    ctx.save()
+    ctx.setTransform(1, 0, 0, 1, 0, 0)
+    ctx.imageSmoothingEnabled = false
+    const sheet = atlas(font, color)
+    const cellW = font.image.naturalWidth / GRID
+    const cellH = font.image.naturalHeight / GRID
+    let dx = x * ratio
+    const dy = y * ratio
+    for (const ch of text) {
+      const code = ch.codePointAt(0) ?? 63
+      if (code >= 256) {
+        const tile = zhTile(font, code, color)
+        if (tile) {
+          ctx.drawImage(tile, dx, dy, tile.width * k, 16 * k)
+          dx += (font.zh.get(code)!.advance * ratio)
+          continue
+        }
+      }
+      const slot = code < 256 ? code : 63
+      const sx = (slot % GRID) * cellW
+      const sy = Math.floor(slot / GRID) * cellH
+      ctx.drawImage(sheet, sx, sy, cellW, cellH, dx, dy, cellW * ratio, cellH * ratio)
+      dx += (font.advances[slot] ?? CELL + 1) * ratio
+    }
+    ctx.restore()
+    return
+  }
+
   const sheet = atlas(font, color)
   const cellW = font.image.naturalWidth / GRID
   const cellH = font.image.naturalHeight / GRID
@@ -273,21 +312,18 @@ export function drawText(
     if (code >= 256) {
       const tile = zhTile(font, code, color)
       if (tile) {
-        const glyph = font.zh.get(code)!
-        const guiW = zhGuiWidth(glyph)
-        // @constraint 目标高必须是 CELL(8) 而不是 16：点阵占 8 个 GUI 像素，
-        //      与 ascii.png 的 8px 字高对齐，汉字和数字才在同一基线上。
-        //      缩放在这里发生，落在设备像素上是 8×ratio，ratio=2 时正好 1:1。
+        const guiW = zhGuiWidth(font.zh.get(code)!)
         /**
-         * @constraint 只有这一处临时开插值。16→8 是 2:1 缩小，nearest 会让每个
-         *      汉字抽掉一半行、变成实心黑块；双线性得到四级灰阶，笔画能分开。
-         *      画完立刻关掉，方块的像素纹理绝不能插值。
+         * @constraint 只有这一处临时开插值。这里是退化路径（ratio 为奇数）：
+         *      16→8 必然 2:1 缩小，nearest 会让每个汉字抽掉一半行、变成实心
+         *      黑块，双线性至少得到灰阶、字与字分得开。画完立刻关掉，方块
+         *      纹理绝不能插值。
          */
         ctx.save()
         ctx.imageSmoothingEnabled = true
         ctx.drawImage(tile, cursor, y, guiW, CELL)
         ctx.restore()
-        cursor += glyph.advance
+        cursor += font.zh.get(code)!.advance
         continue
       }
     }

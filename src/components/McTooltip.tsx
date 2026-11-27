@@ -3,6 +3,7 @@ import { loadFont, type GlyphFont } from '@/lib/font'
 import { measureTooltip, placeTooltip, drawTooltip, type TipLine, type TipSprites } from '@/lib/mcui/tooltip'
 import { prepare } from '@/lib/mcui/surface'
 import { loadSprite } from '@/lib/sprites'
+import { tipStyleOf, type ModernUi } from '@/lib/modern'
 
 /**
  * 原版悬停提示，整块用 canvas 画。
@@ -30,12 +31,18 @@ export interface TipState {
   sub?: string
 }
 
-/** 内容区左上角在画布里的位置 = PADDING(3) + MARGIN(9) */
-const INSET = 12
 /** 每个 GUI 像素占多少 CSS 像素。2 相当于原版 GUI Scale 2 */
 const GUI_SCALE = 2
 
-export function McTooltip({ tip, version }: { tip: TipState | null; version: string }) {
+export function McTooltip({
+  tip,
+  version,
+  modern,
+}: {
+  tip: TipState | null
+  version: string
+  modern?: ModernUi
+}) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [font, setFont] = useState<GlyphFont | null>(null)
   const [sprites, setSprites] = useState<TipSprites>({ background: null, frame: null })
@@ -73,7 +80,12 @@ export function McTooltip({ tip, version }: { tip: TipState | null; version: str
     return out
   }, [tip])
 
-  const box = useMemo(() => (font && lines.length ? measureTooltip(font, lines) : null), [font, lines])
+  const style = useMemo(() => tipStyleOf(modern), [modern])
+
+  const box = useMemo(
+    () => (font && lines.length ? measureTooltip(font, lines, style) : null),
+    [font, lines, style],
+  )
 
   const place = useMemo(() => {
     if (!box) return null
@@ -85,8 +97,8 @@ export function McTooltip({ tip, version }: { tip: TipState | null; version: str
     if (!canvas || !font || !box || !place || !lines.length) return
     const surface = prepare(canvas, box.boxWidth, box.boxHeight, GUI_SCALE)
     if (!surface) return
-    drawTooltip(surface.ctx, font, lines, INSET, INSET, sprites)
-  }, [font, box, place, lines, sprites])
+    drawTooltip(surface.ctx, font, lines, box.inset, box.inset, sprites, style)
+  }, [font, box, place, lines, sprites, style])
 
   if (!tip || !box || !place) return null
 
@@ -94,7 +106,9 @@ export function McTooltip({ tip, version }: { tip: TipState | null; version: str
     <canvas
       ref={canvasRef}
       className="mc-tip-canvas"
-      style={{ left: place.x - INSET * GUI_SCALE, top: place.y - INSET * GUI_SCALE }}
+      // @constraint 退距离必须用 measure 出来的 inset，不能写死 12：
+      //      带阴影时 box 比原版大一圈，写死会让整块提示往右下偏。
+      style={{ left: place.x - box.inset * GUI_SCALE, top: place.y - box.inset * GUI_SCALE }}
       role="tooltip"
       aria-label={lines.map((line) => line.text).join(' ')}
     />

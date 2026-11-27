@@ -35,9 +35,24 @@ export interface SignSpec {
   color: string
   /** 发光字：原版会去掉描边阴影、整体提亮 */
   glow: boolean
+  /**
+   * 是否画投影。
+   * @why 原版告示牌默认带投影，但投影色是「正文色 / 4」——黑字配黑底，投影
+   *      几乎同色，偏移一格之后看起来就是**每个字都有重影**，在 8px 字高下
+   *      完全没法读。这里改成显式开关、默认关：要投影的场景（浅色字、发光字）
+   *      自己打开。
+   */
+  shadow?: boolean
 }
 
-export function drawSign(ctx: CanvasRenderingContext2D, font: GlyphFont, board: CanvasImageSource, spec: SignSpec): void {
+export function drawSign(
+  ctx: CanvasRenderingContext2D,
+  font: GlyphFont,
+  board: CanvasImageSource,
+  spec: SignSpec,
+  /** 一个 GUI 像素占多少设备像素；偶数才能让汉字点阵按整数倍落位 */
+  ratio?: number,
+): void {
   ctx.imageSmoothingEnabled = false
   ctx.drawImage(board, 0, 0, SIGN_GUI.width, SIGN_GUI.height)
 
@@ -47,7 +62,7 @@ export function drawSign(ctx: CanvasRenderingContext2D, font: GlyphFont, board: 
     // 居中落位：原版四行都是水平居中，不是左对齐
     const x = Math.round(SIGN_TEXT.x - width / 2)
     const y = SIGN_TEXT.top + index * SIGN_TEXT.line
-    drawText(ctx, font, line, x, y, spec.color, !spec.glow)
+    drawText(ctx, font, line, x, y, spec.color, spec.shadow ?? false, ratio)
   })
 }
 
@@ -93,6 +108,8 @@ export function drawBook(
   font: GlyphFont,
   page: CanvasImageSource,
   spec: BookSpec,
+  /** 同 drawSign：偶数才走点阵整数倍路径 */
+  ratio?: number,
 ): void {
   ctx.imageSmoothingEnabled = false
   /**
@@ -103,7 +120,7 @@ export function drawBook(
 
   const lines = wrapLines(font, spec.text, BOOK_TEXT.width).slice(0, 13)
   lines.forEach((line, index) => {
-    drawText(ctx, font, line, BOOK_TEXT.x, BOOK_TEXT.y + index * BOOK_TEXT.line, '#3b2d1f', false)
+    drawText(ctx, font, line, BOOK_TEXT.x, BOOK_TEXT.y + index * BOOK_TEXT.line, '#3b2d1f', false, ratio)
   })
 }
 

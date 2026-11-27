@@ -4,6 +4,7 @@ import { loadFont, renderLine, type GlyphFont } from '@/lib/font'
 import { ensureIcon, ICON_PIXELS, iconKey, iconUrl } from '@/lib/itemIcon'
 import { layerSprites, paintLabels, paintLayers } from '@/lib/layerRender'
 import { preloadSprites, spriteOf } from '@/lib/sprites'
+import type { ModernUi } from '@/lib/exportLayers'
 import type { PlacedItem } from '@/lib/workspace'
 
 interface ContainerPanelProps {
@@ -28,6 +29,8 @@ interface ContainerPanelProps {
   selected?: boolean
   /** 标题语言。中文走 unifont 点阵，没有对应字形时自动退回英文 */
   lang?: 'zh' | 'en'
+  /** 现代化 UI：屏幕与导出共用同一份开关 */
+  modern?: ModernUi
   className?: string
 }
 
@@ -63,6 +66,7 @@ export function ContainerPanel({
   def,
   version,
   scale = 3,
+  modern,
   items,
   params = {},
   held = null,
@@ -182,8 +186,20 @@ export function ContainerPanel({
 
   return (
     <div
-      className={`mc-panel${selected ? ' mc-panel--selected' : ''}${className ? ` ${className}` : ''}`}
-      style={{ width: def.width * scale, height: def.height * scale }}
+      className={`mc-panel${selected ? ' mc-panel--selected' : ''}${
+        (modern?.panelRadius ?? 0) > 0 ? ' mc-panel--radius' : ''
+      }${modern?.panelShadow ? ' mc-panel--shadow' : ''}${className ? ` ${className}` : ''}`}
+      /**
+       * @why 用 CSS 变量传圆角：半径必须跟着容器缩放倍率走（4 GUI 像素在 3 倍下
+       *      是 12），写成固定 px 会在大倍率下变成直角，小倍率下变成胶囊。
+       */
+      style={
+        {
+          width: def.width * scale,
+          height: def.height * scale,
+          '--panel-radius': `${(modern?.panelRadius ?? 0) * scale}px`,
+        } as React.CSSProperties
+      }
     >
       <div
         className="mc-panel__inner"

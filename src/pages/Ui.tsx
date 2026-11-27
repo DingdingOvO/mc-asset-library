@@ -1,10 +1,12 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
 import { SearchBox } from '@/components/SearchBox'
 import { McTooltip, type TipState } from '@/components/McTooltip'
 import { SiteTip, type SiteTipState } from '@/components/SiteTip'
 import { ICON_PIXELS, ensureIcon, iconKey, iconUrl } from '@/lib/itemIcon'
 import { BACKDROPS as EXPORT_BACKDROPS, type ExportBackdrop } from '@/lib/containerRender'
+import type { PinnedTip } from '@/lib/exportLayers'
+import { activeModern, normalizeModern, readModernCache, writeModernCache, type ModernUi } from '@/lib/modern'
 import { loadContainers, type ContainerDef, type EffectName } from '@/lib/containers'
 import { defaultParams } from '@/lib/layerRender'
 import { loadItems, type Item } from '@/lib/items'
@@ -16,6 +18,7 @@ import { StatePanel } from '@/components/workbench/StatePanel'
 import { Toolbar } from '@/components/workbench/Toolbar'
 import { ContainerPalette } from '@/components/workbench/ContainerPalette'
 import { ScreenStudio } from '@/components/workbench/ScreenStudio'
+import { TextStudio } from '@/components/workbench/TextStudio'
 import { useLibrary } from '@/lib/useLibrary'
 import { runTarget, suggestName, targetsFor, type ExportTarget } from '@/lib/export/registry'
 import { saveBlob } from '@/lib/export/types'
@@ -56,6 +59,7 @@ const TABS = [
   { id: 'sign', zh: '告示牌' },
   { id: 'book', zh: '书与笔' },
   { id: 'map', zh: '地图' },
+  { id: 'text3d', zh: '立体字' },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -123,10 +127,100 @@ function UiBody({ version }: { version: string }) {
       </nav>
       {tab === 'workbench' ? (
         <Workshop version={version} />
+      ) : tab === 'text3d' ? (
+        <TextStudio version={version} />
       ) : (
         <ScreenStudio version={version} kind={tab} />
       )}
     </div>
+  )
+}
+
+/**
+ * 锁定的提示在画布上的样子。
+ *
+ * @why 锁定的意义是「所见即导出」：如果只在导出时画出提示框，用户在画布上
+ *      看不到它压在哪一格、会不会盖住隔壁的格子。这里复用同一个 McTooltip，
+ *      屏幕和导出走同一份几何。
+ *
+ * @constraint 位置必须实时测量，不能只在锁定那一下算一次：画布可以滚、可以换
+ *      缩放倍率、容器可以被拖动，任何一个动了，提示框留在原地就成了错位的贴纸。
+ *      用 rAF 合并，滚动时不会每一帧重排整棵 React 树。
+ */
+function PinnedTips({
+  pins,
+  workspace,
+  version,
+  nameOf,
+  modern,
+}: {
+  pins: PinnedTip[]
+  workspace: Workspace
+  version: string
+  nameOf: (id: string) => string
+  modern?: ModernUi
+}) {
+  const [spots, setSpots] = useState<{ key: string; x: number; y: number; title: string; note?: string }[]>([])
+
+  useLayoutEffect(() => {
+    if (!pins.length) {
+      setSpots([])
+      return
+    }
+    let frame = 0
+    const measure = () => {
+      frame = 0
+      const stage = document.querySelector('.workbench__stage')
+      const next: typeof spots = []
+      for (const pin of pins) {
+        const node = workspace.nodes.find((entry) => entry.uid === pin.uid)
+        const item = node?.items[pin.slot]
+        if (!item) continue
+        const el = stage?.querySelector(
+          `[data-uid="${pin.uid}"] [data-slot="${pin.slot}"]`,
+        ) as HTMLElement | null
+        if (!el) continue
+        const rect = el.getBoundingClientRect()
+        next.push({
+          key: `${pin.uid}-${pin.slot}`,
+          x: rect.right,
+          y: rect.top + rect.height / 2,
+          title: nameOf(item.id),
+          note: item.count > 1 ? String(item.count) : undefined,
+        })
+      }
+      setSpots(next)
+    }
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(measure)
+    }
+    measure()
+    // @constraint capture 必须开：画布的滚动发生在内层元素上，scroll 不冒泡，
+    //      只有捕获阶段才能在 window 上收到。
+    window.addEventListener('scroll', schedule, true)
+    window.addEventListener('resize', schedule)
+    const stage = document.querySelector('.workbench__stage')
+    const observer = stage ? new ResizeObserver(schedule) : null
+    if (stage && observer) observer.observe(stage)
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+      window.removeEventListener('scroll', schedule, true)
+      window.removeEventListener('resize', schedule)
+      observer?.disconnect()
+    }
+  }, [pins, workspace, nameOf])
+
+  return (
+    <>
+      {spots.map((spot) => (
+        <McTooltip
+          key={spot.key}
+          version={version}
+          modern={modern}
+          tip={{ x: spot.x, y: spot.y, title: spot.title, note: spot.note }}
+        />
+      ))}
+    </>
   )
 }
 
@@ -170,6 +264,23 @@ function Workshop({ version }: { version: string }) {
   const [slotTip, setSlotTip] = useState<TipState | null>(null)
   const [paletteTip, setPaletteTip] = useState<SiteTipState | null>(null)
   const [confirmClear, setConfirmClear] = useState(false)
+  /**
+   * 锁定的悬停提示。
+   * @why 提示框只在指针悬停时存在，一移动就没了，做视频截不到。
+   *      锁定之后它成为一个可导出元素：屏幕上跟着槽位走，导出时按同一份几何
+   *      画进图里。
+   */
+  const [pins, setPins] = useState<PinnedTip[]>([])
+  /** 当前悬停的槽位，锁定时用它作为目标 */
+  const [hoverSlot, setHoverSlot] = useState<PinnedTip | null>(null)
+  /**
+   * 现代化 UI 参数组（含总开关），导出与屏幕共用同一份。
+   * @why 存的是「用户调出来的一整套」，不是「当前生效的」——总开关关掉时
+   *      参数要留着，重新打开还原。生效值一律过 `activeModern`。
+   */
+  const [modern, setModern] = useState<ModernUi>(() => normalizeModern(readModernCache()))
+  /** 真正拿去渲染的那一份：总开关关掉时等于原版 */
+  const appliedModern = useMemo(() => activeModern(modern), [modern])
   /** 拖拽中的物品 id 与指针位置；两者都非空时才画跟随的幽灵块 */
   const [dragItem, setDragItem] = useState<string | null>(null)
   const [dragAt, setDragAt] = useState<{ x: number; y: number } | null>(null)
@@ -344,8 +455,15 @@ function Workshop({ version }: { version: string }) {
   const onSlotHover = (uid: string, slot: number | null, at: { x: number; y: number } | null) => {
     if (slot === null || !at) {
       setSlotTip(null)
+      /**
+       * @why 这里**不清** hoverSlot：锁定的动作是「悬停槽位 → 移鼠标到顶栏的
+       *      样式菜单 → 点锁定」，鼠标一离开槽位就清空的话，点下去之前目标
+       *      就没了，按钮永远停在「先悬停格子」。这里记住的是「最近一次悬停
+       *      过的格子」，指哪锁哪。
+       */
       return
     }
+    setHoverSlot({ uid, slot })
     const node = state.nodes.find((entry) => entry.uid === uid)
     const item = node?.items[slot]
     if (!item) {
@@ -356,7 +474,7 @@ function Workshop({ version }: { version: string }) {
       x: at.x,
       y: at.y,
       title: nameOf(item.id),
-      note: item.count > 1 ? `× ${item.count}` : undefined,
+      note: item.count > 1 ? String(item.count) : undefined,
       sub: item.id,
     })
   }
@@ -373,10 +491,10 @@ function Workshop({ version }: { version: string }) {
       name: 'mc-ui',
       workspace: state,
       defs,
-      options: { version, scale, lang, textureOf },
+      options: { version, scale, lang, textureOf, tips: pins, modern: appliedModern, nameOf },
       backdrop: backdrop === 'transparent' ? null : EXPORT_BACKDROPS[backdrop],
     }),
-    [state, defs, version, scale, lang, textureOf, backdrop],
+    [state, defs, version, scale, lang, textureOf, backdrop, pins, appliedModern, nameOf],
   )
 
   const exportTargets = useMemo(() => targetsFor(layoutSubject), [layoutSubject])
@@ -446,6 +564,17 @@ function Workshop({ version }: { version: string }) {
   const itemCount = state.nodes.reduce((sum, node) => sum + Object.keys(node.items).length, 0)
 
   /**
+   * 指向空格子的锁定提示。
+   * @why 物品被拿走或容器被删之后，锁定项不会自动消失（用户可能只是临时清空，
+   *      还想再放回来）。但导出时它画不出内容，得提前说清楚，否则用户会以为
+   *      导出丢了东西。
+   */
+  const stalePins = pins.filter((pin) => {
+    const node = state.nodes.find((entry) => entry.uid === pin.uid)
+    return !node || !node.items[pin.slot]
+  }).length
+
+  /**
    * 清空画布。
    * @why 两步确认而不是弹窗：清空是不可撤销的（历史栈会被一起丢掉），但弹窗
    *      打断太强。按钮文字变成"确认清空？"并 3 秒后自己退回，点两下就删，
@@ -485,6 +614,25 @@ function Workshop({ version }: { version: string }) {
         onClear={onClear}
         containerCount={state.nodes.length}
         itemCount={itemCount}
+        modern={modern}
+        onModern={(updater) =>
+          setModern((prev) => {
+            const next = updater(prev)
+            writeModernCache(next)
+            return next
+          })
+        }
+        pins={pins}
+        hoverSlot={hoverSlot}
+        onPin={(pin) =>
+          setPins((prev) =>
+            prev.some((entry) => entry.uid === pin.uid && entry.slot === pin.slot) ? prev : [...prev, pin],
+          )
+        }
+        onUnpin={(pin) =>
+          setPins((prev) => prev.filter((entry) => !(entry.uid === pin.uid && entry.slot === pin.slot)))
+        }
+        staleCount={stalePins}
       />
 
       {dragItem && dragAt && (
@@ -540,6 +688,7 @@ function Workshop({ version }: { version: string }) {
             held={held}
             textureOf={textureOf}
             lang={lang}
+            modern={appliedModern}
             selected={selected}
             onSelect={setSelected}
             onSeed={addContainer}
@@ -593,6 +742,7 @@ function Workshop({ version }: { version: string }) {
             {scale}×
           </button>
           </div>
+          <PinnedTips pins={pins} workspace={state} version={version} nameOf={nameOf} modern={appliedModern} />
         </div>
 
         <aside className={`workbench__side workbench__side--right${trayOpen ? ' is-open' : ''}`}>
@@ -657,7 +807,7 @@ function Workshop({ version }: { version: string }) {
         </aside>
       </div>
 
-      <McTooltip tip={slotTip} version={version} />
+      <McTooltip tip={slotTip} version={version} modern={appliedModern} />
       <SiteTip tip={paletteTip} />
     </div>
   )

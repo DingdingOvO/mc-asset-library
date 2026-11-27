@@ -3,6 +3,7 @@ import { ContainerPanel } from '@/components/ContainerPanel'
 import { snapMove } from '@/lib/snap'
 import type { ContainerDef } from '@/lib/containers'
 import type { PlacedItem, Workspace } from '@/lib/workspace'
+import type { ModernUi } from '@/lib/exportLayers'
 
 interface StageProps {
   workspace: Workspace
@@ -13,6 +14,8 @@ interface StageProps {
   textureOf: (id: string) => string | undefined
   /** 容器标题语言，面板与导出一致 */
   lang: 'zh' | 'en'
+  /** 现代化 UI：交给每个面板，屏幕看到的与导出的一致 */
+  modern?: ModernUi
   selected: string | null
   onSelect: (uid: string | null) => void
   /** 空画布上的「起手容器」：点一下就摆进来，省掉去左栏找的动作 */
@@ -48,6 +51,7 @@ export function Stage({
   held,
   textureOf,
   lang,
+  modern,
   selected,
   onSelect,
   onSeed,
@@ -181,6 +185,7 @@ export function Stage({
               params={node.params}
               held={held}
               textureOf={textureOf}
+              modern={modern}
               selected={active}
               onSlotClick={(slot) => onSlotClick(node.uid, slot)}
               onSlotContext={(slot) => onSlotContext(node.uid, slot)}

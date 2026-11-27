@@ -13,6 +13,8 @@ import {
   type MapMarker,
 } from '@/lib/mcui/screens'
 import { useMapPaint, type MapTool } from '@/lib/useMapPaint'
+import { MAP_PIXELS, exportMapDat, mapCommands } from '@/lib/mapExport'
+import { generateTerrain } from '@/lib/mapTerrain'
 import { saveBlob, stamp } from '@/lib/export/types'
 
 /**
@@ -71,6 +73,7 @@ const MAP_TOOLS: { id: MapTool; zh: string; key: string; tip: string }[] = [
   { id: 'eraser', zh: '橡皮', key: 'E', tip: '擦回底图（快捷键 E）' },
   { id: 'fill', zh: '填充', key: 'G', tip: '同一片同色的区域一次铺满（快捷键 G）' },
   { id: 'picker', zh: '吸管', key: 'I', tip: '取图上已有颜色（快捷键 I）' },
+  { id: 'chunk', zh: '区块', key: 'C', tip: '点一下选区块：导出时地图以它为中心（快捷键 C）' },
 ]
 
 const MAP_ICONS: { id: string; zh: string }[] = [
@@ -93,6 +96,46 @@ const MAP_ICONS: { id: string; zh: string }[] = [
   { id: 'abandoned_camp', zh: '废弃营地' },
 ]
 
+/**
+ * 区块网格。
+ *
+ * @why 地图在游戏里是按区块读的：一张 0 级地图覆盖 128 个方块 = 8×8 个区块。
+ *      没有网格的时候，「把基地画在地图中心」只能靠估——而地图的 xCenter/
+ *      zCenter 恰恰是按区块算的。网格把「第几格 = 第几区块」变成看得见的东西。
+ * @constraint 只在预览上画，绝不进 PNG 导出：网格是辅助线，不是地图内容。
+ *      所以它由 `draw(..., overlay)` 的最后一步负责，而不是放进 drawMap。
+ */
+function drawChunkGrid(
+  ctx: CanvasRenderingContext2D,
+  ratio: number,
+  enabled: boolean,
+  chunk: { cx: number; cz: number },
+): void {
+  if (!enabled) return
+  const cells = 8
+  const step = MAP_GUI.width / cells
+  ctx.save()
+  // @why 线宽按 ratio 反算：ctx 已经缩放过，写 1 会变成 ratio 个设备像素，
+  //      4 倍预览下是一条 4 像素的粗白条，把地图切成一格一格。
+  ctx.lineWidth = 1 / ratio
+  ctx.strokeStyle = 'rgba(255, 255, 255, 0.45)'
+  ctx.beginPath()
+  for (let index = 1; index < cells; index += 1) {
+    ctx.moveTo(index * step, 0)
+    ctx.lineTo(index * step, MAP_GUI.height)
+    ctx.moveTo(0, index * step)
+    ctx.lineTo(MAP_GUI.width, index * step)
+  }
+  ctx.stroke()
+
+  ctx.fillStyle = 'rgba(84, 148, 255, 0.24)'
+  ctx.fillRect(chunk.cx * step, chunk.cz * step, step, step)
+  ctx.strokeStyle = '#5494ff'
+  ctx.lineWidth = 1.5 / ratio
+  ctx.strokeRect(chunk.cx * step + 0.5, chunk.cz * step + 0.5, step - 1, step - 1)
+  ctx.restore()
+}
+
 function loadImage(src: string): Promise<HTMLImageElement | null> {
   return new Promise((resolve) => {
     const image = new Image()
@@ -110,6 +153,8 @@ export function ScreenStudio({ version, kind }: { version: string; kind: ScreenK
   const [lines, setLines] = useState(['欢迎来到', 'Minecraft', '', ''])
   const [dye, setDye] = useState(DYES[0]!.value)
   const [glow, setGlow] = useState(false)
+  /** 投影默认关：原版投影色是正文/4，黑字配黑底看着就是每个字都有重影 */
+  const [shadow, setShadow] = useState(false)
 
   const [text, setText] = useState(
     '这是一段可以被拍进视频的文字。\n折行位置由字宽算出来，中文和英文混排都不会溢出版心。',
@@ -127,6 +172,17 @@ export function ScreenStudio({ version, kind }: { version: string; kind: ScreenK
   /** 当前色号，与 `MAP_PALETTE` 的下标 + 1 对应 */
   /** 默认给草地绿：最常见的构图是地表，开局就在灰石色上画会让人以为色板坏了 */
   const [color, setColor] = useState(5)
+
+  /** 种子草图：种子串 + 大陆尺度 */
+  const [seed, setSeed] = useState('')
+  const [radius, setRadius] = useState(1)
+  /** 区块网格与选中的区块（导出时决定地图中心） */
+  const [gridOn, setGridOn] = useState(false)
+  const [chunk, setChunk] = useState({ cx: 0, cz: 0 })
+  /** 地图 id：决定文件名与 give 命令 */
+  const [mapId, setMapId] = useState(0)
+  const [dimension, setDimension] = useState('minecraft:overworld')
+  const [datNote, setDatNote] = useState<string | null>(null)
 
   const [scale, setScale] = useState(4)
   const [busy, setBusy] = useState(false)
@@ -177,7 +233,7 @@ export function ScreenStudio({ version, kind }: { version: string; kind: ScreenK
 
   /** 把当前参数画进任意一块画布；预览和导出共用 */
   const draw = useCallback(
-    (canvas: HTMLCanvasElement, guiScale: number): boolean => {
+    (canvas: HTMLCanvasElement, guiScale: number, overlay = false): boolean => {
       if (!font) return false
       const surface = prepare(canvas, gui.width, gui.height, guiScale)
       if (!surface) return false
@@ -186,14 +242,14 @@ export function ScreenStudio({ version, kind }: { version: string; kind: ScreenK
       if (kind === 'sign') {
         const board = images.get(`gui/signs/${wood}`)
         if (!board) return false
-        drawSign(ctx, font, board, { lines, color: dye, glow })
+        drawSign(ctx, font, board, { lines, color: dye, glow, shadow }, surface.ratio)
         return true
       }
 
       if (kind === 'book') {
         const page = images.get('gui/book')
         if (!page) return false
-        drawBook(ctx, font, page, { text, title, author })
+        drawBook(ctx, font, page, { text, title, author }, surface.ratio)
         return true
       }
 
@@ -205,6 +261,7 @@ export function ScreenStudio({ version, kind }: { version: string; kind: ScreenK
         if (image) icons.set(marker.icon, image)
       }
       drawMap(ctx, background, { markers, scale: mapZoom }, icons, board.raster)
+      if (overlay) drawChunkGrid(ctx, guiScale, gridOn, chunk)
       return true
     },
     [
@@ -217,6 +274,7 @@ export function ScreenStudio({ version, kind }: { version: string; kind: ScreenK
       lines,
       dye,
       glow,
+      shadow,
       text,
       title,
       author,
@@ -224,6 +282,8 @@ export function ScreenStudio({ version, kind }: { version: string; kind: ScreenK
       mapZoom,
       board.raster,
       board.version,
+      gridOn,
+      chunk,
     ],
   )
 
@@ -281,7 +341,15 @@ export function ScreenStudio({ version, kind }: { version: string; kind: ScreenK
       const height = stage.clientHeight - padY
       if (width <= 0 || height <= 0) return
       const fit = Math.floor(Math.min(width / gui.width, height / gui.height))
-      setPreviewScale(Math.max(1, Math.min(fit, 5)))
+      /**
+       * @constraint 只取**偶数**倍率。
+       *      汉字点阵是 16×16、在 GUI 里只占 8 像素高，也就是固定 2:1 缩小。
+       *      倍率为奇数时缩比落在半像素上（5 倍下每格 2.5 个设备像素），
+       *      浏览器只能插值，笔画立刻糊。偶数倍下 16 行正好铺满 16×倍数/2 个
+       *      设备像素，是精确复制——这是「字体清不清」唯一的开关。
+       */
+      const even = Math.max(2, Math.min(6, fit - (fit % 2)))
+      setPreviewScale(even)
     }
     measure()
     const observer = new ResizeObserver(measure)
@@ -292,7 +360,7 @@ export function ScreenStudio({ version, kind }: { version: string; kind: ScreenK
   useLayoutEffect(() => {
     const canvas = canvasRef.current
     if (!canvas) return
-    draw(canvas, previewScale)
+    draw(canvas, previewScale, true)
   }, [draw, previewScale])
 
   /**
@@ -343,6 +411,11 @@ export function ScreenStudio({ version, kind }: { version: string; kind: ScreenK
       if (value > 0) setColor(value)
       return
     }
+    if (tool === 'chunk') {
+      setChunk({ cx: Math.floor(at.x / 16), cz: Math.floor(at.y / 16) })
+      setGridOn(true)
+      return
+    }
     event.currentTarget.setPointerCapture(event.pointerId)
     board.begin(at.x, at.y, tool, tool === 'eraser' ? 0 : color)
   }
@@ -353,6 +426,39 @@ export function ScreenStudio({ version, kind }: { version: string; kind: ScreenK
     moveCaret(event.currentTarget, at)
     if (tool === 'picker' || tool === 'fill') return
     if (at) board.move(at.x, at.y)
+  }
+
+  /**
+   * 导出游戏地图文件。
+   * @constraint 必须先确认画板不是全空：一张 16384 格全 0 的地图在游戏里是
+   *      全透明的，玩家会以为文件坏了。宁可拦下来让他先画点东西。
+   */
+  const exportDat = async () => {
+    const pixels = board.snapshotPixels()
+    let filled = 0
+    for (let index = 0; index < pixels.length; index += 1) if (pixels[index]) filled += 1
+    if (!filled) {
+      setDatNote('画板还是空的：先画点东西，或者用种子生成一张草图')
+      return
+    }
+    setBusy(true)
+    setDatNote(null)
+    try {
+      const blob = await exportMapDat({
+        pixels,
+        scale: mapZoom,
+        xCenter: chunk.cx * 16 + 8,
+        zCenter: chunk.cz * 16 + 8,
+        dimension,
+        locked: true,
+      })
+      saveBlob(blob, `map_${mapId}.dat`)
+      setDatNote(`已写入 ${filled} / ${MAP_PIXELS} 格，文件 map_${mapId}.dat`)
+    } catch (error) {
+      setDatNote(`导出失败：${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      setBusy(false)
+    }
   }
 
   const exportPng = async () => {
@@ -416,7 +522,22 @@ export function ScreenStudio({ version, kind }: { version: string; kind: ScreenK
             <label className="studio__check">
               <input type="checkbox" checked={glow} onChange={(event) => setGlow(event.target.checked)} />
               发光文字
-              <span>原版用荧光墨袋染出的效果：去掉阴影、整体提亮</span>
+              <span>原版用荧光墨袋染出的效果：整体提亮</span>
+            </label>
+
+            <label className="studio__check">
+              <input
+                type="checkbox"
+                checked={shadow}
+                onChange={(event) => setShadow(event.target.checked)}
+                disabled={glow}
+              />
+              投影
+              <span>
+                {glow
+                  ? '发光文字不画投影，与原版一致'
+                  : '原版默认带投影，但投影色是正文色 /4，黑字下看起来像每个字都有重影'}
+              </span>
             </label>
           </>
         )}
@@ -576,6 +697,121 @@ export function ScreenStudio({ version, kind }: { version: string; kind: ScreenK
                 </option>
               ))}
             </select>
+
+            <h2 className="workbench__section">种子草图</h2>
+            {/* @why 明确写「示意」：真实地形要完整的 biomes/noise 管线，
+                同一串种子在游戏里不会长成这张图。不写清楚用户会拿它去对种子。 */}
+            <p className="workbench__hint">
+              按种子铺一张<b>示意</b>地形（海陆、山地、河流），用来对齐海岸线，不是原版世界。
+            </p>
+            <div className="studio__row">
+              <input
+                className="studio__input"
+                value={seed}
+                placeholder="种子，数字或任意文字"
+                onChange={(event) => setSeed(event.target.value)}
+              />
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => board.replace(generateTerrain(seed, radius))}
+              >
+                生成
+              </button>
+            </div>
+            <label className="studio__field">
+              大陆尺度
+              <input
+                type="range"
+                min={0.6}
+                max={1.8}
+                step={0.1}
+                value={radius}
+                onChange={(event) => setRadius(Number(event.target.value))}
+              />
+              <em>{radius.toFixed(1)}</em>
+            </label>
+
+            <h2 className="workbench__section">区块</h2>
+            <label className="studio__check">
+              <input type="checkbox" checked={gridOn} onChange={(event) => setGridOn(event.target.checked)} />
+              显示区块网格
+              <span>128 格 = 8×8 个区块，每格 16×16 方块</span>
+            </label>
+            <div className="studio__row">
+              <label className="studio__field studio__field--tight">
+                区块 X
+                <input
+                  className="studio__input"
+                  type="number"
+                  value={chunk.cx}
+                  onChange={(event) => setChunk((prev) => ({ ...prev, cx: Number(event.target.value) }))}
+                />
+              </label>
+              <label className="studio__field studio__field--tight">
+                区块 Z
+                <input
+                  className="studio__input"
+                  type="number"
+                  value={chunk.cz}
+                  onChange={(event) => setChunk((prev) => ({ ...prev, cz: Number(event.target.value) }))}
+                />
+              </label>
+            </div>
+            <p className="workbench__hint">
+              导出时地图以这个区块为中心（世界坐标 {chunk.cx * 16 + 8}, {chunk.cz * 16 + 8}）。
+              用「区块」工具在画布上点一下也能选。
+            </p>
+
+            <h2 className="workbench__section">导出成游戏地图</h2>
+            <p className="workbench__hint">
+              写一份 <code>map_&lt;id&gt;.dat</code>（gzip 压缩的 NBT），放进存档的 data 目录就能 give 出来。
+            </p>
+            <div className="studio__row">
+              <label className="studio__field studio__field--tight">
+                地图 id
+                <input
+                  className="studio__input"
+                  type="number"
+                  min={0}
+                  max={2147483647}
+                  value={mapId}
+                  onChange={(event) => setMapId(Math.max(0, Number(event.target.value) | 0))}
+                />
+              </label>
+              <label className="studio__field studio__field--tight">
+                维度
+                <select
+                  className="studio__select"
+                  value={dimension}
+                  onChange={(event) => setDimension(event.target.value)}
+                >
+                  <option value="minecraft:overworld">主世界</option>
+                  <option value="minecraft:the_nether">下界</option>
+                  <option value="minecraft:the_end">末地</option>
+                </select>
+              </label>
+            </div>
+            <div className="studio__export">
+              <button type="button" className="btn btn--primary" disabled={busy} onClick={() => void exportDat()}>
+                {busy ? '导出中…' : '导出 .dat'}
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                onClick={() => {
+                  void navigator.clipboard?.writeText(mapCommands(mapId).give)
+                  setDatNote('give 命令已复制')
+                }}
+              >
+                复制 give 命令
+              </button>
+            </div>
+            {datNote && <p className="workbench__hint studio__note">{datNote}</p>}
+            <code className="studio__code">{mapCommands(mapId).give}</code>
+            <p className="workbench__hint">
+              放到 <code>{mapCommands(mapId).place}</code>
+            </p>
           </>
         )}
 

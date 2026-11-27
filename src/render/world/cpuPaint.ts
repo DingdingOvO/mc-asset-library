@@ -201,6 +201,14 @@ function drawTriangle(
   const area = (tri.x1 - tri.x0) * (tri.y2 - tri.y0) - (tri.x2 - tri.x0) * (tri.y1 - tri.y0)
   if (Math.abs(area) < 1e-6) return
   const inv = 1 / area
+  /**
+   * @constraint 绕向必须先归一化。
+   *      重心坐标的符号跟着三角形绕向走：顺时针三角形的 w0/w1 全是负的，
+   *      下面的 `w0 < 0 → continue` 会把**整面**丢掉。方块六个面的绕向在
+   *      网格里并不统一（mesher 按面的法线方向生成），所以同一个方块会有
+   *      一半的面被静默跳过——表现就是"字只剩描边、中间透明"。
+   */
+  const flip = area < 0
   const texel = tri.texel
   const data = texel?.data
   const tw = texel?.width ?? 0
@@ -211,8 +219,10 @@ function drawTriangle(
     for (let x = minX; x <= maxX; x += 1) {
       const px = x + 0.5
       // 重心坐标：w0 对应 (x1,y1)、(x2,y2) 那条边，其余同理
-      const w0 = ((tri.x1 - px) * (tri.y2 - py) - (tri.x2 - px) * (tri.y1 - py)) * inv
-      const w1 = ((tri.x2 - px) * (tri.y0 - py) - (tri.x0 - px) * (tri.y2 - py)) * inv
+      const raw0 = ((tri.x1 - px) * (tri.y2 - py) - (tri.x2 - px) * (tri.y1 - py)) * inv
+      const raw1 = ((tri.x2 - px) * (tri.y0 - py) - (tri.x0 - px) * (tri.y2 - py)) * inv
+      const w0 = flip ? -raw0 : raw0
+      const w1 = flip ? -raw1 : raw1
       const w2 = 1 - w0 - w1
       if (w0 < -1e-4 || w1 < -1e-4 || w2 < -1e-4) continue
 

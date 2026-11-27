@@ -14,7 +14,7 @@ import { MAP_GUI, MAP_PALETTE } from './mcui/screens'
  *      实测拖动时帧率会掉到个位数。
  */
 
-export type MapTool = 'brush' | 'eraser' | 'fill' | 'picker'
+export type MapTool = 'brush' | 'eraser' | 'fill' | 'picker' | 'chunk'
 
 const W = MAP_GUI.width
 const H = MAP_GUI.height
@@ -54,6 +54,10 @@ export interface MapPaintApi {
   canUndo: boolean
   /** 吸管顺手读到的色号；没有颜色返回 0 */
   sample: (x: number, y: number) => number
+  /** 当前像素（调色板下标，0 为空）的副本，导出 .dat 用 */
+  snapshotPixels: () => Uint8Array
+  /** 整张替换（种子草图），进撤销栈，可以一步退回去 */
+  replace: (next: Uint8Array) => void
 }
 
 export function useMapPaint(): MapPaintApi {
@@ -201,7 +205,9 @@ export function useMapPaint(): MapPaintApi {
 
   const begin = useCallback(
     (x: number, y: number, tool: MapTool, color: number): number | null => {
+      // @why chunk 只是在预览上选区块（导出时决定地图中心），不碰像素
       if (tool === 'picker') return paint.current[y * W + x] ?? 0
+      if (tool === 'chunk') return null
       snapshot()
       if (tool === 'fill') {
         flood(x, y, color)
@@ -251,6 +257,18 @@ export function useMapPaint(): MapPaintApi {
     return paint.current[y * W + x] ?? 0
   }, [])
 
+  const snapshotPixels = useCallback(() => new Uint8Array(paint.current), [])
+
+  const replace = useCallback(
+    (next: Uint8Array) => {
+      if (next.length !== SIZE) return
+      snapshot()
+      paint.current = new Uint8Array(next)
+      schedule()
+    },
+    [schedule, snapshot],
+  )
+
   return {
     raster: raster.current,
     version,
@@ -262,5 +280,7 @@ export function useMapPaint(): MapPaintApi {
     clear,
     canUndo,
     sample,
+    snapshotPixels,
+    replace,
   }
 }

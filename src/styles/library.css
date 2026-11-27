@@ -1885,18 +1885,14 @@ button:disabled,
   grid-template-columns: 288px minmax(0, 1fr);
   min-height: 0;
   /**
-   * 整个界面编辑区用点阵字。
+   * 面板本身是网页表单，用系统字体。
    *
-   * @why 面板上的「木种」「四行文字」「染色」和画布里的字是同一件事的两端：
-   *      一边是你敲进去的标签，一边是画出来的结果。面板走系统无衬线时，
-   *      页面像一张网页表单贴在一块游戏画布旁边；换成同一套点阵，字数、
-   *      折行、落点的判断才有参照。
-   * @constraint 字号锁 16px、行高锁 20px。点阵 1 单位 = 1 像素只在这个组合下
-   *      成立，取 13/14px 或 1.4 倍行高都会被重采样成半像素，笔画糊成灰边。
+   * @why 点阵只属于「会被画进游戏画面」的那几行文字（输入框里的内容）。
+   *      把「木种」「四行文字」「染色」这些标签也换成 16px 点阵之后，面板
+   *      每个标签都比正文还粗，一屏塞不下五个控件，而它们一个像素都不会
+   *      出现在导出的图里。
    */
-  font-family: var(--font-pixel);
-  font-size: 16px;
-  line-height: 20px;
+  font-family: var(--font-sans);
 }
 
 .studio__panel {
@@ -1947,12 +1943,6 @@ button:disabled,
   object-fit: contain;
 }
 
-.studio__select {
-  font-family: var(--font-pixel);
-  font-size: 15px;
-  line-height: 20px;
-}
-
 .studio__select,
 .studio__input,
 .studio__textarea {
@@ -1973,8 +1963,7 @@ button:disabled,
  *      成系统无衬线，同一个字两边长得不一样，也就没法判断「这行会不会折行」。
  *      所见即所得不只是一句口号，是排版判断的前提。
  * @constraint 字号必须 16px：点阵字形按 16 像素网格设计，13/15px 会被浏览器
- *      重采样成半像素，笔画糊成一团，比系统字体还难看。行高 1.3 让 10 行正文
- *      正好落在 208px 里，与导出图的折行节奏对得上。
+ *      重采样成半像素，笔画糊成一团，比系统字体还难看。
  */
 .studio__input,
 .studio__textarea {
@@ -2156,19 +2145,6 @@ button:disabled,
   line-height: 1.5;
 }
 
-.studio .workbench__section {
-  font-family: var(--font-pixel);
-  font-size: 16px;
-  line-height: 20px;
-  letter-spacing: 0;
-  text-transform: none;
-}
-
-.studio .btn,
-.studio .chip {
-  font-family: var(--font-pixel);
-  font-size: 15px;
-}
 
 .studio__check span {
   flex-basis: 100%;
@@ -2596,8 +2572,10 @@ button:disabled,
   top: calc(100% + 4px);
   z-index: 60;
   /* @constraint 244 是「底色」+ 三个 chip + 两处 padding 的实测宽度。
-     写 208 时第三颗 chip 会被右边缘裁掉，只能看到「透明」「深色」。 */
-  min-width: 244px;
+     写 208 时第三颗 chip 会被右边缘裁掉，只能看到「透明」「深色」。
+     现代化 UI 那几行是「标签 + 四颗 chip」（关 / 4 / 8 / 12），比原来多一颗，
+     所以要再宽 24px，否则「12」会被裁掉。 */
+  min-width: 268px;
   padding: 4px;
   border: 1px solid var(--border);
   border-radius: var(--radius);
@@ -2636,7 +2614,12 @@ button:disabled,
 
 .menu__split {
   display: flex;
-  flex-wrap: nowrap;
+  /*
+   * @why 允许换行。现代化 UI 的档位有「标签 + 四颗 chip」，比原来的三颗多，
+   *      窄屏上仍可能顶到菜单边缘；nowrap 会把最后一颗 chip 整个挤出可视区，
+   *      而用户看不出那里少了一颗。
+   */
+  flex-wrap: wrap;
   align-items: center;
   gap: 3px;
   margin-top: 4px;
@@ -2644,8 +2627,7 @@ button:disabled,
   border-top: 1px solid var(--border);
 }
 
-/* @constraint 必须 nowrap。菜单宽 208px，三个 chip 已经吃掉 150px，
-   标签一旦允许换行就会变成竖排的「底 / 色」，把 chip 挤到第二行。 */
+/* @constraint 标签本身必须 nowrap。允许它内部折行会变成竖排的「底 / 色」。 */
 .menu__label {
   margin-right: auto;
   white-space: nowrap;
@@ -3058,6 +3040,27 @@ button:disabled,
 .mc-panel--selected .mc-panel__bg {
   outline: 1px solid var(--accent);
   outline-offset: 1px;
+}
+
+/**
+ * 现代化 UI 的面板部分。
+ *
+ * @why 对应导出侧 `exportLayers` 里的 `panelRadius` / `panelShadow`。
+ *      屏幕和导出是两条渲染路径（DOM 面板 / canvas 分层），必须是同一组
+ *      视觉参数，否则用户调完看着满意、导出来却是另一张脸。
+ * @constraint 注意这里**只有面板**。Modern UI 的工具栏提示、圆角阴影、
+ *      标题分隔线全部作用在 tooltip 上（见 `mcui/tooltip`），不在这一层——
+ *      把 tooltip 的效果挂到面板上，就是「改错了东西」。
+ * @constraint 圆角必须用 overflow: hidden 一起给：只写 border-radius 时
+ *      面板里的位图仍然画到直角边界外，放大看四角会露出一点点像素。
+ */
+.mc-panel--radius {
+  border-radius: var(--panel-radius, 8px);
+  overflow: hidden;
+}
+
+.mc-panel--shadow {
+  box-shadow: 0 8px 22px rgb(0 0 0 / 45%);
 }
 
 .mc-panel__slots {
@@ -3782,4 +3785,102 @@ button:disabled,
 .studio__export .btn {
   flex: none;
   white-space: nowrap;
+}
+
+/* 样式菜单里的小徽标与说明 */
+.menu__badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 15px;
+  height: 15px;
+  margin-left: 5px;
+  padding: 0 4px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--accent-contrast);
+  font-size: 10px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+}
+
+.menu__split--wrap {
+  flex-wrap: wrap;
+}
+
+/* 样式已偏离原版时的小圆点。比数字更轻：它只表示"这里不是默认"，不表示数量 */
+.menu__badge--dot {
+  min-width: 6px;
+  width: 6px;
+  height: 6px;
+  padding: 0;
+  background: var(--accent);
+  margin-left: 5px;
+}
+
+.menu__note {
+  margin: 2px 0 0;
+  padding: 6px 9px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font-size: 11.5px;
+  line-height: 1.5;
+}
+
+/* 面板里的一行控件：输入框 + 按钮 */
+.studio__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+}
+
+.studio__row > .studio__input {
+  flex: 1;
+  min-width: 0;
+}
+
+.studio__row > .btn {
+  flex: none;
+  white-space: nowrap;
+}
+
+/* 带标签的窄字段：区块坐标、地图 id 这类 2~4 位数字 */
+.studio__field {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.studio__field--tight {
+  flex: 1 1 0;
+}
+
+.studio__field em {
+  font-style: normal;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 面板里的命令片段：等宽、可选中、自动折行 */
+.studio__code {
+  display: block;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--text);
+  font-family: ui-monospace, 'SFMono-Regular', Menlo, monospace;
+  font-size: 11px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+  user-select: all;
+}
+
+.studio__note {
+  color: var(--accent);
 }
