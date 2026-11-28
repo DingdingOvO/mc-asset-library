@@ -34,7 +34,7 @@ const LOCK_FILE = path.join(ROOT, 'mc-assets.lock.json')
  * @constraint 只列静态段；`items/:group` 这类带参路由靠 404.html 兜住即可，
  *     把每个物品组都落一份 index.html 会让 _site 里多出几百份 800KB 的副本。
  */
-const ROUTES = ['blocks', 'items', 'entities', 'particles', 'ui', 'data', 'browse', 'sounds', 'structures']
+const ROUTES = ['blocks', 'items', 'entities', 'particles', 'ui', 'text3d', 'data', 'browse', 'sounds', 'structures']
 
 /**
  * 由数据推导出的二级路由。
