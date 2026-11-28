@@ -15,7 +15,12 @@ export function AppShell() {
    * @why `/ui` 的外壳高度是 `100dvh - 顶栏`，页脚再占 60px 就会多出一条滚动条：
    *      整块画布永远露出半截页脚，看起来像布局没对齐。
    */
-  const fullBleed = pathname === '/ui'
+  /**
+   * @why 立体字页也算 fullBleed：它和界面工作台一样是「一整屏的工具」，
+   *      而不是可滚动的列表页。不锁高度的话 studio 的 grid 高度由内容撑开，
+   *      预览台会变成一条固定高度的窄带，下面拖出一条没用的滚动条。
+   */
+  const fullBleed = pathname === '/ui' || pathname === '/text3d'
 
   return (
     <div className={fullBleed ? 'shell shell--full' : 'shell'}>
@@ -46,6 +51,9 @@ export function AppShell() {
           </NavLink>
           <NavLink to="/ui" className="topbar__link">
             界面
+          </NavLink>
+          <NavLink to="/text3d" className="topbar__link">
+            立体字
           </NavLink>
           <NavLink to="/data" className="topbar__link">
             数据

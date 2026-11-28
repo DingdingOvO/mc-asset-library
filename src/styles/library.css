@@ -1992,6 +1992,50 @@ button:disabled,
   position: relative;
 }
 
+/* @why 顶栏 + 页头 + studio 要正好占满一屏，和界面工作台同一套约束 */
+.text3d {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - var(--topbar-h));
+  min-height: 0;
+  padding: 20px 20px 16px;
+  max-width: none;
+}
+
+/* @constraint 必须 min-height:0：flex 子项默认 min-height:auto，内容一高就把
+   父级撑破，页面多出一条滚动条，而预览台本身还带着自己的滚动条。 */
+.text3d .studio {
+  min-height: 0;
+}
+
+.text3d .page-head {
+  margin-bottom: 14px;
+}
+
+/**
+ * 立体字页的预览台。
+ *
+ * @why 换成深色。这一页要展示的只有一样东西：六个面的明暗差。方块字默认材质
+ *      是白混凝土、石英这类浅色，浅底浅字的结果是「一片白」，立体感全靠
+ *      描边撑着。深底之后顶面/侧面/底面的亮度差才读得出来。
+ * @constraint 只改屏幕上的衬底，导出仍是透明底 PNG（`backdrop: null`）。
+ *      两者必须分开：给导出也垫深色的话，用户拿到的素材就没法叠在自己画面上了。
+ */
+.text3d__stage {
+  /* @constraint 不能纯黑：这一页的默认观感是「白方块 + 黑描边」，纯黑底上
+     描边直接融进背景，等于白做。中灰既能托住白色顶面，又能让黑色描边显形。 */
+  background-color: #3c424b;
+  background-image: radial-gradient(120% 90% at 50% 0%, #4b525d 0%, #333941 68%);
+}
+
+.text3d__stage .studio__canvas {
+  filter: drop-shadow(0 18px 34px rgb(0 0 0 / 55%));
+  /* @constraint 高度也要夹住：画布是正方形，只夹宽度时它比舞台高，
+     上下会被裁掉一截，字的顶部正好落在被裁的那一段。 */
+  max-height: 100%;
+  width: auto;
+}
+
 /* 悬停格高亮：尺寸和位置由 JS 直接写，这里只管长相 */
 .studio__caret {
   position: absolute;

@@ -191,7 +191,24 @@ export function drawMap(
 ): void {
   ctx.imageSmoothingEnabled = false
   ctx.drawImage(background, 0, 0, MAP_GUI.width, MAP_GUI.height)
-  if (paint) ctx.drawImage(paint, 0, 0, MAP_GUI.width, MAP_GUI.height)
+
+  if (paint) {
+    ctx.drawImage(paint, 0, 0, MAP_GUI.width, MAP_GUI.height)
+    /**
+     * @why 像素层必须按纸的形状裁一遍。
+     *      底图 `map_background` 不是正方形：四角被斜切、边缘有 1px 的手绘锯齿，
+     *      那是「一张纸」而不是「一块贴图」。像素层是 128×128 的实心矩形，直接
+     *      压上去会把整张纸的形状连同纸边一起盖掉 —— 空画布时明明是一张纸，
+     *      一落笔就变成一块方方正正的贴图，用户说的「纸被盖住了」就是这个。
+     * @constraint 用 `destination-in` 就会连画布上已有的内容一起裁。所以
+     *      `drawMap` 必须是这张 ctx 上的**第一个**绘制动作：ScreenStudio 里
+     *      它确实排在最前，overlay（区块网格）在它之后画，不受影响。
+     */
+    ctx.save()
+    ctx.globalCompositeOperation = 'destination-in'
+    ctx.drawImage(background, 0, 0, MAP_GUI.width, MAP_GUI.height)
+    ctx.restore()
+  }
 
   /**
    * 缩放等级用刻度表达：原版这一档由服务端地图数据决定（一格代表多少方块），
@@ -213,4 +230,22 @@ export function drawMap(
     const size = MAP_GUI.icon
     ctx.drawImage(image, marker.x - size / 2, marker.y - size / 2, size, size)
   }
+
+  /**
+   * 最后把纸边压回最上层。
+   *
+   * @why 只裁 alpha 是不够的：纸边那圈深棕描边本身是不透明的，像素照样盖掉它，
+   *      结果地图看着像"一块方图"而不是"一张纸"。原版这一圈边是用
+   *      `map_background` 的 1px 描边提供的，永远压在地图内容之上。
+   * @constraint 只重画最外 1px（源图坐标），不能整张重画 —— 整张会把地图内容
+   *      盖掉。源图 64 拉到 128 是 2 倍，所以厚度取 2 个 GUI 像素；左右两条跳过
+   *      已经在上下条里画过的两角，避免四角被叠两次变深。
+   */
+  const SRC = 64
+  const DST = MAP_GUI.width
+  const T = DST / SRC
+  ctx.drawImage(background, 0, 0, SRC, 1, 0, 0, DST, T)
+  ctx.drawImage(background, 0, SRC - 1, SRC, 1, 0, DST - T, DST, T)
+  ctx.drawImage(background, 0, 1, 1, SRC - 2, 0, T, T, DST - T * 2)
+  ctx.drawImage(background, SRC - 1, 1, 1, SRC - 2, DST - T, T, T, DST - T * 2)
 }

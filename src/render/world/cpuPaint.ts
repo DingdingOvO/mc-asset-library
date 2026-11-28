@@ -45,6 +45,52 @@ export interface CpuPaintResult {
   textured: number
 }
 
+/**
+ * 补上相邻三角形之间的 1 像素缝。
+ *
+ * @why 画家算法逐三角形填充，两个共边的三角形在公共边上都会把像素判成"外部"
+ *      （重心坐标在边界处是 ±1e-9 的浮点噪声），于是每两个面之间漏一条 1px 的
+ *      透明缝。单独一个面只有 8 像素宽时，这条缝占笔画的八分之一——整幅字看
+ *      起来像"网格线拼的空心字"，而这跟几何、跟光照都没关系。
+ * @constraint 只补「四邻里有 ≥2 个不透明」的洞。放宽到 1 个会把字的外轮廓也
+ *      吞掉一圈，字会变胖、描边消失；放宽到"只要有邻居"就等于对整张图做膨胀。
+ * @constraint 必须读快照写原图。边补边读会让同一条缝沿着扫描方向一路蔓延，
+ *      最后把背景也填成实心。
+ */
+function sealSeams(out: Uint8ClampedArray, width: number, height: number): void {
+  const src = new Uint8ClampedArray(out)
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const i = (y * width + x) * 4
+      if (src[i + 3]! !== 0) continue
+      let count = 0
+      let r = 0
+      let g = 0
+      let b = 0
+      let a = 0
+      const take = (x2: number, y2: number) => {
+        if (x2 < 0 || y2 < 0 || x2 >= width || y2 >= height) return
+        const j = (y2 * width + x2) * 4
+        if (src[j + 3]! === 0) return
+        count += 1
+        r += src[j]!
+        g += src[j + 1]!
+        b += src[j + 2]!
+        a += src[j + 3]!
+      }
+      take(x - 1, y)
+      take(x + 1, y)
+      take(x, y - 1)
+      take(x, y + 1)
+      if (count < 2) continue
+      out[i] = r / count
+      out[i + 1] = g / count
+      out[i + 2] = b / count
+      out[i + 3] = a / count
+    }
+  }
+}
+
 /** 一个待填充的屏幕空间三角形 */
 interface Sprite {
   /** 画家算法排序用的相机空间深度（越小越远） */
@@ -175,6 +221,7 @@ export async function paintVoxelsCpu(
     drawTriangle(out, width, height, tri)
   }
 
+  sealSeams(out, width, height)
   ctx.putImageData(image, 0, 0)
   return { triangles: items.length, textured }
 }

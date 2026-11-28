@@ -18,7 +18,6 @@ import { StatePanel } from '@/components/workbench/StatePanel'
 import { Toolbar } from '@/components/workbench/Toolbar'
 import { ContainerPalette } from '@/components/workbench/ContainerPalette'
 import { ScreenStudio } from '@/components/workbench/ScreenStudio'
-import { TextStudio } from '@/components/workbench/TextStudio'
 import { useLibrary } from '@/lib/useLibrary'
 import { runTarget, suggestName, targetsFor, type ExportTarget } from '@/lib/export/registry'
 import { saveBlob } from '@/lib/export/types'
@@ -59,7 +58,6 @@ const TABS = [
   { id: 'sign', zh: '告示牌' },
   { id: 'book', zh: '书与笔' },
   { id: 'map', zh: '地图' },
-  { id: 'text3d', zh: '立体字' },
 ] as const
 
 type TabId = (typeof TABS)[number]['id']
@@ -127,8 +125,6 @@ function UiBody({ version }: { version: string }) {
       </nav>
       {tab === 'workbench' ? (
         <Workshop version={version} />
-      ) : tab === 'text3d' ? (
-        <TextStudio version={version} />
       ) : (
         <ScreenStudio version={version} kind={tab} />
       )}

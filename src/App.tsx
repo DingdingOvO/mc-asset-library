@@ -21,6 +21,7 @@ const Browse = lazy(() => import('@/pages/Browse'))
 const Data = lazy(() => import('@/pages/Data'))
 const Registry = lazy(() => import('@/pages/Registry'))
 const Ui = lazy(() => import('@/pages/Ui'))
+const Text3D = lazy(() => import('@/pages/Text3D'))
 const NotFound = lazy(() => import('@/pages/NotFound'))
 
 /**
@@ -49,6 +50,7 @@ export default function App() {
           <Route path="structures" element={page(<Structures />)} />
           <Route path="particles" element={page(<Particles />)} />
           <Route path="ui" element={page(<Ui />)} />
+          <Route path="text3d" element={page(<Text3D />)} />
           <Route path="data" element={page(<Data />)} />
           <Route path="data/:id" element={page(<Registry />)} />
           {/* @why 旧链接可能在别处贴过，别让它们 404 */}
