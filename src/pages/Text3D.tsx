@@ -1,66 +1,92 @@
 /**
- * 立体字：把点阵字挤成体素方块，能转、能导。
+ * 立体字：点阵字形 → 轮廓 → 挤出，能转、能导。
  *
  * @why 单独一页而不是「界面」下的一个页签。它是「造一张图」的工具，
  *      和告示牌/书页/地图那种「预览一个 GUI 控件」不是同一件事：那三页的输出
  *      是游戏里真实存在的界面，这一页的输出是模型文件和 PNG。挂在界面页签里
  *      会让分类失去意义。
  *
- * @why 形态参考 [Cube 3D Text](https://github.com/EaseCation/cube-3d-text)
- *      （EaseCation，MIT）：MC 风格的立体字不是「一块厚板」，而是
- *      「一层方块 + 一圈深色描边」—— 描边才是让字从背景里跳出来的东西。
- *      这里用体素层面外扩 1 格实现同一件事，不引入 three.js。
+ * @why 形态照 [Cube 3D Text](https://github.com/EaseCation/cube-3d-text)（EaseCation，
+ *      MIT，React + Three.js）的做法：**取字形轮廓 → 三角化 → 挤出 → 沿轮廓外扩
+ *      一圈薄壳当描边**。不是"一个像素长一个方块"。逐方块堆出来的字，相邻方块
+ *      之间留缝、描边围着每个方块长，「日」中间那道缝会被吃掉一半，放大后就是
+ *      一排积木。这里是整块实心 + 沿轮廓均匀的一圈边，和参考项目同一个拓扑。
+ *      差别只在字形来源：那边用系统字体轮廓，本站用原版点阵字，所以字是像素风的。
  *
  * @constraint 光栅必须用 `Unifont UI` 的 16px 字号。这份字体的 unitsPerEm
  *      正好是 16，一个字体单位 = 一个像素，点阵落在整数网格上；换成任何
  *      系统字体，第一件事就是亚像素抗锯齿，二值化之后笔画会随机缺一格。
  *
- * @constraint 体素尺寸必须封顶。一句话 24 个字 × 16 列 = 384 格宽，逐面建
- *      网格是几万个三角形，CPU 预览会卡在个位数帧率。这里按最长边 160 格
- *      截断并提示，够做标题，不够做小字。
+ * @constraint 体素尺寸必须封顶。一句话 24 个字 × 16 列 = 384 格宽，轮廓点数
+ *      翻几倍，CPU 逐三角形填充会卡在个位数帧率。这里按最长边 160 格截断并提示。
  */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
-import { buildVoxelBatches, type VoxelBatch } from '@/render/world/mesher'
 import { paintVoxelsCpu } from '@/render/world/cpuPaint'
-import { createVolume, setBlock } from '@/lib/world/terrain'
-import { loadGeometry } from '@/lib/world/geometry'
 import { exportStructureSolid, exportStructureStill, type StructureSubject } from '@/lib/export/structure'
 import { saveBlob } from '@/lib/export/types'
+import { buildTextGeometry, type Text3DGeometry } from '@/lib/text3d/build'
 import { currentDpr, watchDpr } from '@/lib/dpr'
 import { useLibrary } from '@/lib/useLibrary'
 
 /** 可选方块。都是 16×16 的整格方块，字体最常用的几种「实心色」 */
 const BLOCKS: { id: string; zh: string }[] = [
-  { id: 'minecraft:white_concrete', zh: '白混凝土' },
-  { id: 'minecraft:quartz_block', zh: '石英' },
-  { id: 'minecraft:gold_block', zh: '金块' },
-  { id: 'minecraft:diamond_block', zh: '钻石块' },
-  { id: 'minecraft:emerald_block', zh: '绿宝石块' },
-  { id: 'minecraft:sea_lantern', zh: '海晶灯' },
-  { id: 'minecraft:oak_planks', zh: '橡木木板' },
-  { id: 'minecraft:redstone_block', zh: '红石块' },
+  { id: 'block/white_concrete', zh: '白混凝土' },
+  { id: 'block/stone', zh: '石头' },
+  { id: 'block/deepslate', zh: '深板岩' },
+  { id: 'block/quartz_block_side', zh: '石英' },
+  { id: 'block/gold_block', zh: '金块' },
+  { id: 'block/diamond_block', zh: '钻石块' },
+  { id: 'block/emerald_block', zh: '绿宝石块' },
+  { id: 'block/sea_lantern', zh: '海晶灯' },
+  { id: 'block/oak_planks', zh: '橡木木板' },
+  { id: 'block/redstone_block', zh: '红石块' },
 ]
 
 /**
  * 描边方块。
- * @why 固定黑色而不是让用户选：Cube 3D Text 的描边是「反向法线膨胀」出来的
- *      纯色壳，颜色只影响观感、不影响结构。给一排色板只会让面板变长，
+ * @why 固定黑色而不是让用户选：参考项目的描边是沿轮廓的一圈纯色壳，
+ *      颜色只影响观感、不影响结构。给一排色板只会让面板变长，
  *      真正想换色的场景可以直接导模型回 Blender 改材质。
  */
-const OUTLINE_BLOCK = 'minecraft:black_concrete'
+const OUTLINE_TEXTURE = 'block/black_concrete'
 
 /** 最长边（格）。超过就整体降采样，字会糊但仍能看 */
-const MAX_EDGE = 160
+const MAX_EDGE = 280
 /**
  * 预览画布上限（物理像素）。
  *
- * @why 不能停在 720。一个方块字每格只有 8~10 个像素，顶面（朝上的那个面）
- *      在屏幕上正好 1 像素高，会被读成"笔画边缘的白色小齿"。提到 1024 之后
- *      每格约 12 像素，顶面有 2~3 像素，厚度才真正读得出来。
  * @constraint 别再往上加：CPU 逐三角形填充是 O(像素)，1024² 已经是
  *      百毫秒级，拖动旋转时会明显拖手。
  */
 const PREVIEW_MAX = 1024
+
+/**
+ * 可选字体。
+ *
+ * @why 默认给系统无衬线体而不是点阵字。参考项目（Cube 3D Text）的字形是
+ *      矢量轮廓，所以字是平滑的；点阵字即使挤出成三维，边缘仍是一圈 90° 台阶，
+ *      放大看像积木。用系统的无衬线体在 32px 以上光栅化，再把暗部二值化，
+ *      台阶只有 1 格宽，挤出后就是参考项目那种"整体一块"的字。
+ *      点阵字作为另一个选项保留——做 8 位风、复古风的标题时它更对味。
+ */
+const FONTS: { id: string; zh: string; css: string; weight: string }[] = [
+  {
+    id: 'sans',
+    zh: '无衬线（系统）',
+    css: '"Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", "PingFang SC", "Hiragino Sans GB", Arial, sans-serif',
+    weight: '700',
+  },
+  {
+    id: 'serif',
+    zh: '衬线（系统）',
+    css: '"Noto Serif CJK SC", "Source Han Serif SC", "Songti SC", SimSun, Georgia, serif',
+    weight: '700',
+  },
+  { id: 'pixel', zh: 'MC 点阵', css: '"Unifont UI", monospace', weight: '400' },
+]
+
+/** 可选字号（像素）。点阵字体取 16 的整数倍才不会有灰边 */
+const SIZES = [24, 32, 40, 56, 72]
 
 interface GlyphMask {
   width: number
@@ -72,10 +98,11 @@ interface GlyphMask {
 /**
  * 文字 → 点阵掩码。
  *
- * @constraint 二值化阈值取 128：点了 16px 字号的点阵字在浏览器里仍会带一点
- *      抗锯齿灰边，按 alpha>0 取会把整圈灰边也算成方块，字胖一圈、笔画粘连。
+ * @constraint 二值化阈值取 128。大字号下抗锯齿的灰边有 1~2 像素宽，
+ *      按 `alpha > 0` 取会把整圈灰边也算成墨，字胖一圈、笔画粘连；
+ *      阈值定在中间，边缘落在半像素上，字形和字体原本的轮廓最接近。
  */
-async function rasterize(text: string): Promise<GlyphMask | null> {
+async function rasterize(text: string, size: number, font: string, weight: string): Promise<GlyphMask | null> {
   const lines = text.replace(/\r/g, '').split('\n').slice(0, 8)
   if (!lines.some((line) => line.trim())) return null
 
@@ -83,21 +110,22 @@ async function rasterize(text: string): Promise<GlyphMask | null> {
     await document.fonts.ready
   }
 
+  const lineHeight = Math.round(size * 1.12)
   const probe = document.createElement('canvas').getContext('2d')
   if (!probe) return null
-  probe.font = '16px "Unifont UI"'
-  const width = Math.max(1, Math.ceil(Math.max(...lines.map((line) => probe.measureText(line).width)))) + 2
-  const height = lines.length * 16 + 2
+  probe.font = `${weight} ${size}px ${font}`
+  const width = Math.max(1, Math.ceil(Math.max(...lines.map((line) => probe.measureText(line).width)))) + 4
+  const height = lines.length * lineHeight + 4
 
   const canvas = document.createElement('canvas')
   canvas.width = width
   canvas.height = height
   const ctx = canvas.getContext('2d', { willReadFrequently: true })
   if (!ctx) return null
-  ctx.font = '16px "Unifont UI"'
+  ctx.font = `${weight} ${size}px ${font}`
   ctx.textBaseline = 'top'
   ctx.fillStyle = '#ffffff'
-  lines.forEach((line, index) => ctx.fillText(line, 1, 1 + index * 16))
+  lines.forEach((line, index) => ctx.fillText(line, 2, 2 + index * lineHeight))
 
   const image = ctx.getImageData(0, 0, width, height).data
   const data = new Uint8Array(width * height)
@@ -107,69 +135,43 @@ async function rasterize(text: string): Promise<GlyphMask | null> {
   return { width, height, data }
 }
 
-/**
- * 掩码 → 体素体积。y 轴翻转：画布往下，体素往上。
- *
- * @why 描边在**同一张掩码上**外扩，而不是把字放大一圈：放大一圈会让笔画之间
- *      的空隙被填平（「日」中间那道缝直接消失），外扩只影响轮廓外沿。
- * @constraint 描边体素与主体同厚。薄一层的话侧看会露馅，字像贴着个黑纸板。
- */
-function toVolume(mask: GlyphMask, depth: number, block: string, outline: string | null) {
-  const pad = outline ? 1 : 0
-  const width = mask.width + pad * 2
-  const height = mask.height + pad * 2
-  const volume = createVolume([width, height, depth])
-
-  const ink = (x: number, y: number): boolean => {
-    if (x < 0 || y < 0 || x >= mask.width || y >= mask.height) return false
-    return mask.data[y * mask.width + x] === 1
-  }
-
-  for (let y = 0; y < mask.height; y += 1) {
-    for (let x = 0; x < mask.width; x += 1) {
-      if (!ink(x, y)) continue
-      for (let z = 0; z < depth; z += 1) {
-        setBlock(volume, x + pad, height - 1 - (y + pad), z, block)
-      }
+/** 超长文本整体降采样 */
+function fit(mask: GlyphMask, edge: number): GlyphMask {
+  const scale = Math.max(mask.width, mask.height) > edge ? edge / Math.max(mask.width, mask.height) : 1
+  if (scale === 1) return mask
+  const w = Math.max(1, Math.floor(mask.width * scale))
+  const h = Math.max(1, Math.floor(mask.height * scale))
+  const data = new Uint8Array(w * h)
+  for (let y = 0; y < h; y += 1) {
+    for (let x = 0; x < w; x += 1) {
+      const sx = Math.min(mask.width - 1, Math.floor(x / scale))
+      const sy = Math.min(mask.height - 1, Math.floor(y / scale))
+      data[y * w + x] = mask.data[sy * mask.width + sx] ? 1 : 0
     }
   }
-
-  if (outline) {
-    for (let y = -1; y <= mask.height; y += 1) {
-      for (let x = -1; x <= mask.width; x += 1) {
-        if (ink(x, y)) continue
-        let touch = false
-        for (let dy = -1; dy <= 1 && !touch; dy += 1) {
-          for (let dx = -1; dx <= 1; dx += 1) {
-            if (ink(x + dx, y + dy)) {
-              touch = true
-              break
-            }
-          }
-        }
-        if (!touch) continue
-        for (let z = 0; z < depth; z += 1) {
-          setBlock(volume, x + pad, height - 1 - (y + pad), z, outline)
-        }
-      }
-    }
-  }
-
-  return volume
+  return { width: w, height: h, data }
 }
 
 export default function Text3D() {
   const { version, loading } = useLibrary()
-  if (loading || !version) return <p className="empty">正在加载方块几何…</p>
+  if (loading || !version) return <p className="empty">正在加载方块贴图…</p>
   return <Text3DBody version={version} />
 }
 
 function Text3DBody({ version }: { version: string }) {
   const [text, setText] = useState('MC 素材库\n立体字')
   const [block, setBlock] = useState(BLOCKS[0]!.id)
-  const [outline, setOutline] = useState(true)
-  const [depth, setDepth] = useState(3)
-  const [rotX, setRotX] = useState(22)
+  /**
+   * @why 厚度和描边用**字号的比例**，不是固定的格数。参考项目（Cube 3D Text）
+   *      里这两个参数也是相对 size 的：同一套数值在标题和大字上看起来一样厚。
+   *      按格数写死的话，换成 56px 字号，4 格厚度就从"厚板"变成"一张纸"。
+   */
+  const [depthRatio, setDepthRatio] = useState(0.4)
+  const [outlineRatio, setOutlineRatio] = useState(0.03)
+  const [boldRatio, setBoldRatio] = useState(0.02)
+  const [fontId, setFontId] = useState(FONTS[0]!.id)
+  const [fontSize, setFontSize] = useState(40)
+  const [rotX, setRotX] = useState(32)
   const [rotY, setRotY] = useState(-32)
   const [zoom, setZoom] = useState(1)
   const [busy, setBusy] = useState<string | null>(null)
@@ -177,12 +179,7 @@ function Text3DBody({ version }: { version: string }) {
 
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const stageRef = useRef<HTMLDivElement>(null)
-  const [prepared, setPrepared] = useState<{
-    batches: VoxelBatch[]
-    mask: GlyphMask
-    span: number
-    pivot: [number, number, number]
-  } | null>(null)
+  const [geometry, setGeometry] = useState<Text3DGeometry | null>(null)
   const [size, setSize] = useState(PREVIEW_MAX)
   /**
    * 画布的 CSS 边长。
@@ -216,84 +213,66 @@ function Text3DBody({ version }: { version: string }) {
   }, [])
 
   /**
-   * 文字/材质/厚度变化 → 重建体素。
-   * @constraint 必须整体重建而不是增量：改一个字符会让整行宽度变化，
-   *      增量更新会把旧字形的方块留在左边。
+   * 文字/材质/厚度/描边变化 → 重建几何。
+   * @constraint 必须整体重建：改一个字符会让整行宽度变化，增量更新会把旧字形
+   *      的轮廓留在左边。
    */
   useEffect(() => {
     let alive = true
     void (async () => {
-      const mask = await rasterize(text)
+      const face = FONTS.find((item) => item.id === fontId) ?? FONTS[0]!
+      const raw = await rasterize(text, fontSize, face.css, face.weight)
       if (!alive) return
-      if (!mask) {
-        setPrepared(null)
+      if (!raw) {
+        setGeometry(null)
         return
       }
-      /**
-       * @constraint 超长文本整体降采样，不能只截断：截断会把半句话留下，
-       *      用户以为自己打错字了。
-       */
-      const edge = Math.max(mask.width, mask.height)
-      const scale = edge > MAX_EDGE ? MAX_EDGE / edge : 1
-      const fitted: GlyphMask = (() => {
-        if (scale === 1) return mask
-        const w = Math.max(1, Math.floor(mask.width * scale))
-        const h = Math.max(1, Math.floor(mask.height * scale))
-        const data = new Uint8Array(w * h)
-        for (let y = 0; y < h; y += 1) {
-          for (let x = 0; x < w; x += 1) {
-            const sx = Math.min(mask.width - 1, Math.floor(x / scale))
-            const sy = Math.min(mask.height - 1, Math.floor(y / scale))
-            data[y * w + x] = mask.data[sy * mask.width + sx] ? 1 : 0
-          }
-        }
-        return { width: w, height: h, data }
-      })()
-
-      const volume = toVolume(fitted, depth, block, outline ? OUTLINE_BLOCK : null)
-      const ids = outline ? [block, OUTLINE_BLOCK] : [block]
-      const { geometry } = await loadGeometry(version, ids)
-      if (!alive) return
-      const batches = buildVoxelBatches(volume, geometry)
-      if (!batches.length) {
-        setPrepared(null)
-        setNote('这个方块没有可用的几何，换一个材质试试')
-        return
-      }
-      setNote(scale < 1 ? `文字超出 ${MAX_EDGE} 格，已整体缩到 ${Math.round(scale * 100)}%` : null)
-      const pad = outline ? 1 : 0
-      setPrepared({
-        batches,
-        mask: fitted,
-        span: Math.max(fitted.width, fitted.height, 1) * 1.16,
-        pivot: [fitted.width / 2 + pad, fitted.height / 2 + pad, depth / 2],
+      const mask = fit(raw, MAX_EDGE)
+      const built = buildTextGeometry(mask, {
+        depth: Math.max(0.75, fontSize * depthRatio),
+        outline: fontSize * outlineRatio,
+        bold: fontSize * boldRatio,
+        texture: block,
+        outlineTexture: OUTLINE_TEXTURE,
       })
+      if (!alive) return
+      if (built.batches.length === 0) {
+        setGeometry(null)
+        setNote('这段文字没有可挤出的轮廓，换一句话试试')
+        return
+      }
+      setNote(
+        Math.max(raw.width, raw.height) > MAX_EDGE
+          ? `文字超出 ${MAX_EDGE} 格，已整体缩到 ${Math.round((MAX_EDGE / Math.max(raw.width, raw.height)) * 100)}%`
+          : null,
+      )
+      setGeometry(built)
     })()
     return () => {
       alive = false
     }
-  }, [text, block, depth, outline, version])
+  }, [text, block, depthRatio, outlineRatio, boldRatio, fontId, fontSize])
 
-  /** CPU 画家算法绘制。字是小体量，不需要 WebGL 上下文 */
+  /** CPU 画家算法绘制。字量小，不需要 WebGL 上下文 */
   useEffect(() => {
     const canvas = canvasRef.current
-    if (!canvas || !prepared) return
+    if (!canvas || !geometry) return
     canvas.width = size
     canvas.height = size
     void paintVoxelsCpu(
       canvas,
-      prepared.batches,
+      geometry.batches,
       {
         size,
         rotX,
         rotY,
         zoom,
-        span: prepared.span,
-        pivot: prepared.pivot,
+        span: geometry.span,
+        pivot: geometry.pivot,
       },
       version,
     )
-  }, [prepared, size, rotX, rotY, zoom, version])
+  }, [geometry, size, rotX, rotY, zoom, version])
 
   /** 拖动旋转：与结构页同一套手感（水平全 360，垂直夹在 ±80） */
   const beginDrag = (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -315,21 +294,21 @@ function Text3DBody({ version }: { version: string }) {
   }
 
   const subject = useMemo<StructureSubject | null>(() => {
-    if (!prepared) return null
+    if (!geometry) return null
     return {
       kind: 'structure',
       id: 'text3d',
       version,
-      batches: prepared.batches,
+      batches: geometry.batches,
       rotX,
       rotY,
       zoom,
-      span: prepared.span,
-      pivot: prepared.pivot,
+      span: geometry.span,
+      pivot: geometry.pivot,
       size: 1024,
       backdrop: null,
     }
-  }, [prepared, version, rotX, rotY, zoom])
+  }, [geometry, version, rotX, rotY, zoom])
 
   const run = useCallback(
     async (kind: 'glb' | 'obj' | 'stl' | 'png') => {
@@ -352,7 +331,7 @@ function Text3DBody({ version }: { version: string }) {
     [subject],
   )
 
-  const stats = prepared ? prepared.batches.reduce((sum, batch) => sum + batch.vertexCount, 0) / 3 : 0
+  const stats = geometry ? geometry.batches.reduce((sum, batch) => sum + batch.vertexCount, 0) / 3 : 0
 
   return (
     <div className="page text3d">
@@ -360,7 +339,7 @@ function Text3DBody({ version }: { version: string }) {
         <p className="page-head__crumb">MC 素材库 / 立体字</p>
         <h1 className="page-head__title">立体字</h1>
         <p className="page-head__note">
-          点阵字 → 方块 → 立体字，带一圈深色描边。可导出 GLB / OBJ / STL 或透明底 PNG。
+          字形轮廓挤出成整块立体字，沿轮廓一圈薄描边。可导出 GLB / OBJ / STL 或透明底 PNG。
         </p>
       </header>
 
@@ -375,8 +354,35 @@ function Text3DBody({ version }: { version: string }) {
             placeholder="两行标题，回车换行"
           />
           <p className="workbench__hint">
-            用 16px 点阵光栅化，一个亮像素长一个方块。中文一行 12 字以内最清楚。
+            按所选字号光栅化，一个亮像素等于一格。字号越大轮廓越细，字越像"一整块"；
+            点阵字体请选 16 的整数倍。
           </p>
+
+          <label className="studio__field">
+            字体
+            <select className="studio__select" value={fontId} onChange={(event) => setFontId(event.target.value)}>
+              {FONTS.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.zh}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="studio__field">
+            字号
+            <select
+              className="studio__select"
+              value={fontSize}
+              onChange={(event) => setFontSize(Number(event.target.value))}
+            >
+              {SIZES.map((item) => (
+                <option key={item} value={item}>
+                  {item} px
+                </option>
+              ))}
+            </select>
+          </label>
 
           <h2 className="workbench__section">材质</h2>
           <select className="studio__select" value={block} onChange={(event) => setBlock(event.target.value)}>
@@ -387,30 +393,37 @@ function Text3DBody({ version }: { version: string }) {
             ))}
           </select>
 
-          <label className="studio__check">
-            <input type="checkbox" checked={outline} onChange={(event) => setOutline(event.target.checked)} />
-            深色描边（轮廓外扩 1 格）
-          </label>
-
           <label className="studio__field">
-            厚度 {depth} 格
+            厚度 {Math.round(depthRatio * 100)}% 字号
             <input
               type="range"
-              min={1}
-              max={6}
-              value={depth}
-              onChange={(event) => setDepth(Number(event.target.value))}
+              min={0.05}
+              max={0.5}
+              step={0.01}
+              value={depthRatio}
+              onChange={(event) => setDepthRatio(Number(event.target.value))}
             />
           </label>
           <label className="studio__field">
-            缩放 {zoom.toFixed(1)}×
+            字重 +{Math.round(boldRatio * 100)}% 字号
             <input
               type="range"
-              min={0.5}
-              max={2.5}
-              step={0.1}
-              value={zoom}
-              onChange={(event) => setZoom(Number(event.target.value))}
+              min={0}
+              max={0.08}
+              step={0.005}
+              value={boldRatio}
+              onChange={(event) => setBoldRatio(Number(event.target.value))}
+            />
+          </label>
+          <label className="studio__field">
+            描边 {outlineRatio === 0 ? '关' : `${Math.round(outlineRatio * 100)}% 字号`}
+            <input
+              type="range"
+              min={0}
+              max={0.08}
+              step={0.005}
+              value={outlineRatio}
+              onChange={(event) => setOutlineRatio(Number(event.target.value))}
             />
           </label>
 
@@ -433,6 +446,17 @@ function Text3DBody({ version }: { version: string }) {
               max={180}
               value={Math.round(rotY)}
               onChange={(event) => setRotY(Number(event.target.value))}
+            />
+          </label>
+          <label className="studio__field">
+            缩放 {zoom.toFixed(1)}×
+            <input
+              type="range"
+              min={0.5}
+              max={2.5}
+              step={0.1}
+              value={zoom}
+              onChange={(event) => setZoom(Number(event.target.value))}
             />
           </label>
 

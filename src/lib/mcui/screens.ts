@@ -176,6 +176,75 @@ export interface MapSpec {
   scale: number
 }
 
+/**
+ * 纸张的配色与边厚。
+ *
+ * @why 不再直接把 `map_background` 画上去。那张贴图的边缘是「手撕纸」——
+ *      64×64 里最外一圈的 alpha 时有时无，本意是在 16×16 的物品图标里
+ *      做一点毛边。放到 128 的界面再整数放大 6 倍，那圈 1 texel 的缺口就变成
+ *      12 像素的锯齿洞：上边缘被撕掉一条、角上是直角缺牙、描边一处宽一处窄，
+ *      也就是用户说的「边框没调好」。地图界面要的是**一圈整齐的纸边**。
+ *      这里只保留素材的**用色**：出现最多的颜色是纸面，第二多的是描边，
+ *      形状按规则矩形重建。
+ * @constraint 颜色必须从贴图统计，不能写死。不同版本 / 资源包换掉这张图，
+ *      写死的米色就和纸面对不上，整圈边框会像贴错了色块。
+ */
+export interface PaperStyle {
+  /** 纸面底色 */
+  paper: string
+  /** 纸边描边色 */
+  edge: string
+  /** 边框厚度（GUI 像素）= 贴图里 1 texel 放大后的宽度 */
+  width: number
+}
+
+const STYLE_CACHE = new WeakMap<CanvasImageSource, PaperStyle | null>()
+
+/**
+ * 贴图边长。
+ * @why `CanvasImageSource` 是联合类型，没有统一的 `width`：`HTMLImageElement`
+ *      有 `naturalWidth`，`ImageBitmap` 只有 `width`。取错边长算出来的边框厚度
+ *      会差一倍，表现是边框忽粗忽细。
+ */
+function sourceEdge(image: CanvasImageSource): number {
+  const box = image as { naturalWidth?: number; width?: number }
+  return box.naturalWidth || box.width || 64
+}
+
+function paperStyle(background: CanvasImageSource, source: number): PaperStyle | null {
+  const hit = STYLE_CACHE.get(background)
+  if (hit !== undefined) return hit
+
+  const canvas = document.createElement('canvas')
+  canvas.width = source
+  canvas.height = source
+  const ctx = canvas.getContext('2d', { willReadFrequently: true })
+  if (!ctx) {
+    STYLE_CACHE.set(background, null)
+    return null
+  }
+  ctx.imageSmoothingEnabled = false
+  ctx.drawImage(background, 0, 0, source, source)
+
+  const tally = new Map<number, number>()
+  const { data } = ctx.getImageData(0, 0, source, source)
+  for (let i = 0; i < data.length; i += 4) {
+    if (data[i + 3]! < 128) continue
+    const key = (data[i]! << 16) | (data[i + 1]! << 8) | data[i + 2]!
+    tally.set(key, (tally.get(key) ?? 0) + 1)
+  }
+  const ranked = [...tally.entries()].sort((a, b) => b[1] - a[1])
+  const hex = (key: number): string => `#${key.toString(16).padStart(6, '0')}`
+
+  const style: PaperStyle = {
+    paper: ranked[0] ? hex(ranked[0][0]) : '#d6be96',
+    edge: ranked[1] ? hex(ranked[1][0]) : '#99876c',
+    width: Math.max(1, Math.round(MAP_GUI.width / source)),
+  }
+  STYLE_CACHE.set(background, style)
+  return style
+}
+
 export function drawMap(
   ctx: CanvasRenderingContext2D,
   background: CanvasImageSource,
@@ -190,36 +259,38 @@ export function drawMap(
   paint: CanvasImageSource | null = null,
 ): void {
   ctx.imageSmoothingEnabled = false
-  ctx.drawImage(background, 0, 0, MAP_GUI.width, MAP_GUI.height)
+  const style = paperStyle(background, sourceEdge(background))
 
+  if (style) {
+    ctx.fillStyle = style.paper
+    ctx.fillRect(0, 0, MAP_GUI.width, MAP_GUI.height)
+  } else {
+    // 取不到色（图还没解码完）时退回原贴图，至少不是一块空白
+    ctx.drawImage(background, 0, 0, MAP_GUI.width, MAP_GUI.height)
+  }
+
+  /**
+   * @why 地图内容是**铺满** 128×128 的，纸边是靠最后一层压在内容之上得到的。
+   *      原版也是这个次序：底图先画、地图数据盖满、边框最后压回来。
+   * @constraint 内容铺满 ≠ 把纸盖掉。铺满的是内容区，纸边只有 2 GUI 像素，
+   *      最后由下面那段矩形边补回最上层，两者不冲突。
+   */
   if (paint) {
     ctx.drawImage(paint, 0, 0, MAP_GUI.width, MAP_GUI.height)
-    /**
-     * @why 像素层必须按纸的形状裁一遍。
-     *      底图 `map_background` 不是正方形：四角被斜切、边缘有 1px 的手绘锯齿，
-     *      那是「一张纸」而不是「一块贴图」。像素层是 128×128 的实心矩形，直接
-     *      压上去会把整张纸的形状连同纸边一起盖掉 —— 空画布时明明是一张纸，
-     *      一落笔就变成一块方方正正的贴图，用户说的「纸被盖住了」就是这个。
-     * @constraint 用 `destination-in` 就会连画布上已有的内容一起裁。所以
-     *      `drawMap` 必须是这张 ctx 上的**第一个**绘制动作：ScreenStudio 里
-     *      它确实排在最前，overlay（区块网格）在它之后画，不受影响。
-     */
-    ctx.save()
-    ctx.globalCompositeOperation = 'destination-in'
-    ctx.drawImage(background, 0, 0, MAP_GUI.width, MAP_GUI.height)
-    ctx.restore()
   }
 
   /**
    * 缩放等级用刻度表达：原版这一档由服务端地图数据决定（一格代表多少方块），
    * 站上没有地形，只能把「倍率」画成角标，让人知道自己在哪一档。
+   * @constraint 要避开纸边，否则刻度点会画到描边色上，黑点糊在深棕里看不清。
    */
   if (spec.scale > 0) {
     ctx.save()
     ctx.globalAlpha = 0.55
     ctx.fillStyle = '#1a1a1a'
+    const inset = style ? style.width + 1 : 2
     for (let i = 0; i < spec.scale; i += 1) {
-      ctx.fillRect(MAP_GUI.width - 6 - i * 3, 2, 2, 2)
+      ctx.fillRect(MAP_GUI.width - 6 - i * 3 - inset, inset, 2, 2)
     }
     ctx.restore()
   }
@@ -232,20 +303,19 @@ export function drawMap(
   }
 
   /**
-   * 最后把纸边压回最上层。
+   * 纸边最后画：压在地图内容之上。
    *
-   * @why 只裁 alpha 是不够的：纸边那圈深棕描边本身是不透明的，像素照样盖掉它，
-   *      结果地图看着像"一块方图"而不是"一张纸"。原版这一圈边是用
-   *      `map_background` 的 1px 描边提供的，永远压在地图内容之上。
-   * @constraint 只重画最外 1px（源图坐标），不能整张重画 —— 整张会把地图内容
-   *      盖掉。源图 64 拉到 128 是 2 倍，所以厚度取 2 个 GUI 像素；左右两条跳过
-   *      已经在上下条里画过的两角，避免四角被叠两次变深。
+   * @why 内容铺满 128×128，纸边只有 2 GUI 像素，如果先画就被内容盖掉了 ——
+   *      空画布时是一张纸、一落笔就变成一块方图，这正是用户最早说的
+   *      「地图把纸盖住了」。
    */
-  const SRC = 64
-  const DST = MAP_GUI.width
-  const T = DST / SRC
-  ctx.drawImage(background, 0, 0, SRC, 1, 0, 0, DST, T)
-  ctx.drawImage(background, 0, SRC - 1, SRC, 1, 0, DST - T, DST, T)
-  ctx.drawImage(background, 0, 1, 1, SRC - 2, 0, T, T, DST - T * 2)
-  ctx.drawImage(background, SRC - 1, 1, 1, SRC - 2, DST - T, T, T, DST - T * 2)
+  if (!style) return
+  const t = style.width
+  const w = MAP_GUI.width
+  const h = MAP_GUI.height
+  ctx.fillStyle = style.edge
+  ctx.fillRect(0, 0, w, t)
+  ctx.fillRect(0, h - t, w, t)
+  ctx.fillRect(0, t, t, h - t * 2)
+  ctx.fillRect(w - t, t, t, h - t * 2)
 }
