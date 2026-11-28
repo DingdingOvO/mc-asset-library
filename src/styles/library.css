@@ -2026,6 +2026,10 @@ button:disabled,
      描边直接融进背景，等于白做。中灰既能托住白色顶面，又能让黑色描边显形。 */
   background-color: #3c424b;
   background-image: radial-gradient(120% 90% at 50% 0%, #4b525d 0%, #333941 68%);
+  /* @constraint 必须重置 background-size。父类 `.studio__stage` 的棋盘格是 16px
+     平铺，渐变会继承这个平铺尺寸，铺成一条条横向条纹——看上去像贴了张壁纸。 */
+  background-size: auto;
+  background-repeat: no-repeat;
 }
 
 .text3d__stage .studio__canvas {
