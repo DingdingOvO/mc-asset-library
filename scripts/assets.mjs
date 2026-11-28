@@ -528,11 +528,26 @@ async function applySoundSummary(assetsDir, versionsFile) {
     const manifest = await readJson(soundsList)
     const total = Array.isArray(manifest.items) ? manifest.items.length : 0
     if (!total) return 0
-    // @why 音频是否真的随包分发，决定首页敢不敢写「可试听」
-    const audio = await readdir(path.join(assetsDir, 'sounds')).then(
-      (names) => (names.some((name) => name.endsWith('.ogg')) ? 1 : 0),
-      () => 0,
-    )
+    /**
+     * 音频是否真的随包分发，决定首页敢不敢写「可试听」。
+     *
+     * @why 这里原先是 `readdir(sounds).some(名字以 .ogg 结尾)`，只看第一层。
+     *      但音效真实布局是 `sounds/mob/creeper/say1.ogg`——第一层全是分类目录，
+     *      一个 .ogg 都扫不到，于是线上明明带着 467MB 音频，标记仍然是 0，
+     *      音效页把所有试听按钮禁掉、顶部还挂一条「没带音频」的提示。
+     * @constraint 不用递归 readdir：1.7 万个文件全走一遍只为了知道「有没有」，
+     *      而 `--no-sounds` 是整包开关，不存在「有的分类有、有的没有」。
+     *      抽几条清单里的路径去 stat 就够，命中一条即可。
+     */
+    const audio = await (async () => {
+      const samples = (manifest.items ?? [])
+        .filter((item) => typeof item.p === 'string' && item.p)
+        .slice(0, 16)
+      for (const item of samples) {
+        if (await exists(path.join(assetsDir, 'sounds', `${item.p}.ogg`))) return 1
+      }
+      return 0
+    })()
     const all = await readJson(versionsFile)
     const version = path.basename(assetsDir)
     const entry = (all.versions ?? []).find((item) => item.id === version)
@@ -622,7 +637,16 @@ async function cmdPack() {
   const mcDir = path.join(outDir, 'mc', version)
   const assetDir = path.join(ASSETS_ROOT, version)
   const derivedDir = path.join(DERIVED_ROOT, version)
-  if (await exists(assetDir)) await cp(assetDir, mcDir, { recursive: true })
+  if (await exists(assetDir)) {
+    await cp(assetDir, mcDir, { recursive: true })
+  } else {
+    /**
+     * @why 少了素材时这里原本一声不响：pack 照样成功、`_site` 照样生成，
+     *      只是没有 `mc/` 目录，部署上去首页直接「素材索引加载失败」。
+     *      本地跑 `pages:build` 想先看眼版式的人最容易被这一点坑到。
+     */
+    log(`⚠ 没有找到 ${path.relative(ROOT, assetDir)}，站点只会带上界面，不带素材`)
+  }
   // @constraint 版本清单在 mc-assets 根层，不在版本目录内；漏了它首页会直接
   //      "素材索引加载失败"，而且只看目录结构很难发现
   const versionsFile = path.join(ASSETS_ROOT, 'versions.json')
