@@ -1,0 +1,17 @@
+/* 数据页：两张表之间的呼吸 */
+
+.num {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.data-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-8);
+}
+
+.data-note {
+  margin-top: var(--space-6);
+}

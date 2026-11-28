@@ -1,31 +1,41 @@
 import { useEffect, useRef, useState } from 'react'
 
 interface VirtualGridOptions {
+  /** 兜底行高：第一帧还没有子元素时用它估算 */
   rowHeight: number
+  /** 列宽下限，只在 computedStyle 读不到时用于估算列数 */
   minColumnWidth: number
-}
-
-interface VirtualGridState {
-  start: number
-  end: number
-  padTop: number
-  padBottom: number
+  /** 过滤条件变化时传一个新值，会把视口拉回网格顶部 */
+  resetKey?: unknown
 }
 
 /**
  * 只渲染视口附近的网格行。
- * @why 每个立方体要十几个 3D 变换的 div，一百多个卡片就是一千多个合成层，
- *      浏览器直接掉帧；这里按滚动位置算可见行，屏外只留空白高度。
+ *
+ * @why 方块页有 1100 多张卡片，每张是一个 canvas 光栅化出来的立方体；
+ *      全量挂载会同时创建上千个渲染上下文。虚拟滚动把这批工作压到屏幕内。
+ *
+ * @constraint 行高必须实测，不能沿用写死的数字。之前用 118/120 估，
+ *      而 CSS 里卡片高度会随名字行数、断点、字号变化，估算一漂，滚动条总高
+ *      就跟着漂，滚到底部会多出一片空白或者提前截断。
+ *
+ * @constraint resetKey 变化后要回到网格顶部。搜索把 1146 项缩到 3 项时，
+ *      原来的滚动位置在 6000px 处，浏览器虽然会夹紧滚动条，但那一帧里
+ *      padTop 还是旧值，用户先看到一片空白再看到结果。
  */
 export function useVirtualGrid<T>(items: readonly T[], options: VirtualGridOptions) {
-  const { rowHeight, minColumnWidth } = options
+  const { rowHeight, minColumnWidth, resetKey } = options
   const ref = useRef<HTMLDivElement>(null)
-  const [state, setState] = useState<VirtualGridState>({
-    start: 0,
-    end: 48,
-    padTop: 0,
-    padBottom: 0,
-  })
+  const [state, setState] = useState({ start: 0, end: 48, padTop: 0, padBottom: 0 })
+
+  // 过滤条件变了：先把视口拉回网格顶部
+  useEffect(() => {
+    const node = ref.current
+    if (!node || resetKey === undefined) return
+    const top = node.getBoundingClientRect().top + window.scrollY
+    const anchor = Math.max(0, top - 120)
+    if (window.scrollY > anchor) window.scrollTo({ top: anchor })
+  }, [resetKey])
 
   useEffect(() => {
     let frame = 0
@@ -34,29 +44,50 @@ export function useVirtualGrid<T>(items: readonly T[], options: VirtualGridOptio
       const node = ref.current
       if (!node) return
 
-      /**
-       * @constraint 列数必须从计算样式读，不能按 minColumnWidth 自己除：
-       *      CSS 在手机断点换了更窄的列宽（104 → 84），两边算法不一致的话
-       *      虚拟滚动会以为只有 3 列、实际排了 4 列，视口底部留半屏空白。
-       */
-      const style = getComputedStyle(node).gridTemplateColumns
-      const columns =
-        style && style !== 'none'
-          ? style.trim().split(/\s+/).length
-          : Math.max(1, Math.floor(node.clientWidth / minColumnWidth))
+      const style = getComputedStyle(node)
+      const columns = Math.max(
+        1,
+        style.gridTemplateColumns && style.gridTemplateColumns !== 'none'
+          ? style.gridTemplateColumns.trim().split(/\s+/).length
+          : Math.floor(node.clientWidth / minColumnWidth),
+      )
+
+      // 实测行高：第二行第一个卡片的 offsetTop 减去第一行的，含行间距
+      const kids = node.children
+      let rowH = rowHeight
+      if (kids.length > columns) {
+        const first = kids[0] as HTMLElement
+        const next = kids[columns] as HTMLElement
+        const delta = next.offsetTop - first.offsetTop
+        if (delta > 8) rowH = delta
+      } else if (kids.length > 0) {
+        const first = kids[0] as HTMLElement
+        const gap = Number.parseFloat(style.rowGap) || 0
+        if (first.offsetHeight > 8) rowH = first.offsetHeight + gap
+      }
+
       const rows = Math.ceil(items.length / columns)
       const rect = node.getBoundingClientRect()
-
-      // 已经滚过网格顶部的距离，负数说明网格还没进视口
       const scrolled = Math.max(0, -rect.top)
-      const startRow = Math.max(0, Math.floor(scrolled / rowHeight) - 1)
-      const endRow = Math.min(rows, startRow + Math.ceil(window.innerHeight / rowHeight) + 2)
+      const startRow = Math.max(0, Math.floor(scrolled / rowH) - 1)
+      const endRow = Math.min(rows, startRow + Math.ceil(window.innerHeight / rowH) + 2)
 
-      setState({
-        start: startRow * columns,
-        end: Math.min(items.length, endRow * columns),
-        padTop: startRow * rowHeight,
-        padBottom: Math.max(0, (rows - endRow) * rowHeight),
+      setState((prev) => {
+        const next = {
+          start: startRow * columns,
+          end: Math.min(items.length, endRow * columns),
+          padTop: startRow * rowH,
+          padBottom: Math.max(0, (rows - endRow) * rowH),
+        }
+        if (
+          prev.start === next.start &&
+          prev.end === next.end &&
+          prev.padTop === next.padTop &&
+          prev.padBottom === next.padBottom
+        ) {
+          return prev
+        }
+        return next
       })
     }
 
@@ -71,12 +102,16 @@ export function useVirtualGrid<T>(items: readonly T[], options: VirtualGridOptio
     measure()
     window.addEventListener('scroll', schedule, { passive: true })
     window.addEventListener('resize', schedule)
+    const observer = new ResizeObserver(schedule)
+    if (ref.current) observer.observe(ref.current)
+
     return () => {
       if (frame) window.cancelAnimationFrame(frame)
       window.removeEventListener('scroll', schedule)
       window.removeEventListener('resize', schedule)
+      observer.disconnect()
     }
-  }, [items.length, rowHeight, minColumnWidth])
+  }, [items.length, rowHeight, minColumnWidth, resetKey])
 
   return {
     ref,

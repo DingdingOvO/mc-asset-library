@@ -86,6 +86,13 @@ export function ExportPanel({
 }: ExportPanelProps) {
   const [busy, setBusy] = useState<string | null>(null)
   const [progress, setProgress] = useState(0)
+  /**
+   * @why 导出失败要贴在面板里说，不能用 window.alert。
+   *      原生弹窗会打断整个页面、在移动端还会截断长信息（真正的报错往往是
+   *      一整段 WebCodecs / Canvas 的异常文本）。而且 alert 关掉之后错误就没了，
+   *      用户想再看一遍只能重新点一次。
+   */
+  const [error, setError] = useState<string | null>(null)
   const [solidId, setSolidId] = useState('glb')
   const [videoId, setVideoId] = useState('mp4')
   const [withAnim, setWithAnim] = useState(true)
@@ -149,15 +156,17 @@ export function ExportPanel({
     if (busy) return
     setBusy(target.label)
     setProgress(0)
+    setError(null)
     try {
       const blob = await runTarget(subject, target)
       if (!blob) {
-        window.alert('没有可导出的内容')
+        setError('没有可导出的内容：这台机器上该格式渲染不出画面')
         return
       }
+      setError(null)
       saveBlob(blob, suggestName(subject, target))
-    } catch (error) {
-      window.alert(error instanceof Error ? error.message : String(error))
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause))
     } finally {
       setBusy(null)
       setProgress(0)
@@ -354,6 +363,14 @@ export function ExportPanel({
         </p>
         {!videos.some((item) => item.id === 'mp4') && (
           <p className="dl__hint">当前浏览器不支持 WebCodecs，MP4 不可用，请改用 WebP / APNG。</p>
+        )}
+        {error && (
+          <p className="notice notice--error" role="alert">
+            导出失败：{error}
+            <button type="button" className="notice__close" onClick={() => setError(null)} aria-label="关闭">
+              ×
+            </button>
+          </p>
         )}
       </div>
     </div>

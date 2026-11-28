@@ -1,0 +1,8 @@
+/**
+ * 旧样式层（只保留画布与弹窗内部结构）。
+ *
+ * @constraint 加载顺序在 main.tsx：legacy → App → index。
+ *      旧规则特异性往往更高（.workbench .btn），必须排在新基元之前，
+ *      否则页面里的按钮改不动样式。
+ */
+@import './legacy-workbench.css';

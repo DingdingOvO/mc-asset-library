@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { createPortal } from 'react-dom'
 import { ModelView, subjectPivot, type Subject, type ViewState } from './ModelView'
+import { Dialog } from '@/ui'
 import { ExportPanel } from './ExportPanel'
 import { SoundLinks } from './SoundLinks'
-import { CloseIcon } from './icons'
 import type { AnimFile } from '@/lib/anim'
 import type { Axis, DyeColor } from '@/lib/entityLayers'
 import { motionOf, type Motion } from '@/lib/motion'
@@ -70,12 +69,6 @@ export function ModelModal({
    * @constraint 必须防重入：蒙层点击与关闭按钮可能在同一帧各触发一次，
    *      不挡住就会 setTimeout 两次、onClose 两次。
    */
-  const [closing, setClosing] = useState(false)
-  const requestClose = useCallback(() => {
-    if (closing) return
-    setClosing(true)
-    window.setTimeout(onClose, 170)
-  }, [closing, onClose])
 
   /**
    * 动作分类：这只生物到底在走、在飞、在游，还是在划桨。
@@ -97,10 +90,11 @@ export function ModelModal({
     setSpeed(motion.initial)
   }, [motion.initial, subject])
 
-  // 同一弹窗里换了对象（列表里连点两张卡片）要把退场标记清掉，否则新内容带着淡出动画出现
-  useEffect(() => {
-    setClosing(false)
-  }, [subject])
+  /**
+   * @why 关闭动画、Esc、遮罩点击、滚动锁、焦点圈定全部交给 Dialog：
+   *      这一版之前自己实现，和 TextureDetail 那份行为对不上——一个能按 Esc 关，
+   *      一个不能；一个锁背景滚动，一个不锁。
+   */
 
   const flat = subject?.kind === 'block' && Boolean(subject.flat)
   const isEntity = subject?.kind === 'entity'
@@ -250,23 +244,8 @@ export function ModelModal({
    *      顶部几十像素压住（标题正好在那一段）。fixed + z-index 在 main 内部
    *      压不过它，只有脱离这棵子树才行。
    */
-  return createPortal(
-    <div
-      className={`modal-backdrop${closing ? ' is-closing' : ''}`}
-      onClick={requestClose}
-      role="presentation"
-    >
-      <div
-        className="modal modal--block"
-        role="dialog"
-        aria-modal="true"
-        aria-label={title}
-        onClick={(event) => event.stopPropagation()}
-      >
-        <button type="button" className="modal__close" onClick={requestClose} aria-label="关闭">
-          <CloseIcon />
-        </button>
-
+  return (
+    <Dialog open onClose={onClose} label={title} className="modal--block">
         <div className="modal__view" ref={viewBoxRef}>
           {empty ? (
             <span className="entry-fallback">{hint ?? '没有可用的立体模型'}</span>
@@ -319,8 +298,8 @@ export function ModelModal({
 
         <div className="modal__side">
           <div className="modal__head">
-            <div className="detail__name">{title}</div>
-            {subtitle && <div className="detail__en">{subtitle}</div>}
+            <div className="modal__title">{title}</div>
+            {subtitle && <div className="modal__subtitle">{subtitle}</div>}
           </div>
           <div className="modal__body">
             <div className="kv-list">
@@ -493,8 +472,6 @@ export function ModelModal({
             />
           </div>
         </div>
-      </div>
-    </div>,
-    document.body,
+    </Dialog>
   )
 }

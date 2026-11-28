@@ -279,6 +279,51 @@ async function cmdSync() {
     log(`派生数据就绪：mc-derived/${after.version}（${DERIVED_FILES.length} 个文件）`)
   }
 
+  /**
+   * @why 必须在这里就把派生的 creativetabs.json 放进素材目录并归一化物品分组。
+   *      pack 阶段（部署）会做同样的事，但开发态不走 pack：浏览器直接读
+   *      mc-assets/{version}/items.json，那份是 fetch-assets 生成的，`g` 只有
+   *      building_blocks / misc 两个值、`groups` 只剩 misc 一项。于是线上有
+   *      十二个分类，本地却只有「全部 / 未分类」两个 chip——本地永远看不出
+   *      这个 bug，一部署才发现。
+   * @constraint 顺序与 pack 一致：先分组后图标。分组要按 id 匹配创造栏，
+   *      图标归一化会清掉找不到贴图的条目。
+   */
+  const derivedDir = path.join(DERIVED_ROOT, after.version)
+  const tabsFile = path.join(derivedDir, 'creativetabs.json')
+  if (await exists(tabsFile)) {
+    await copyFile(tabsFile, path.join(after.assets.dir, 'creativetabs.json'))
+    await normalizeItemGroups(after.assets.dir)
+    const fixed = await normalizeIcons(after.assets.dir)
+    if (fixed > 0) log(`图标路径修正 ${fixed} 条`)
+  }
+
+  /**
+   * @why 音效清单同样要在 sync 里落到素材目录。
+   *      fetch-assets 带 --no-sounds 时写出的 sounds.json 是 `items: []`（它按磁盘
+   *      上的 .ogg 统计），而真正可用的清单在 mc-derived/sounds.json（4961 条，
+   *      带官方字幕中文名）。pack 会把它覆盖上去，开发态却不会——于是本地音效页
+   *      一片空白，线上正常。这是「本地看不出、上线才发现」的第二个同类 bug。
+   * @constraint 必须在 applySoundSummary 之前：音效计数读的就是这份清单，顺序
+   *      反了计到的还是 0。
+   */
+  const soundsFile = path.join(derivedDir, 'sounds.json')
+  if (await exists(soundsFile)) {
+    await copyFile(soundsFile, path.join(after.assets.dir, 'sounds.json'))
+  }
+
+  /**
+   * @why 首页的「音效 0 个」和 `/registries/` 旧路由两个 bug 都只在开发态出现：
+   *      pack 阶段（部署）已经修过，本地 dev 直接读 mc-assets 里的原始文件，
+   *      于是本地永远看不到真实数字、链接还要过一次重定向。把这两步提到 sync，
+   *      两边才走同一套归一化。
+   */
+  const versionsFile = path.join(ASSETS_ROOT, 'versions.json')
+  const sounds = await applySoundSummary(after.assets.dir, versionsFile)
+  if (sounds) log(`音效计数 ${sounds} 条`)
+  const routes = await normalizeRegistryRoutes(after.assets.dir, versionsFile)
+  if (routes) log(`注册表路由修正 ${routes} 处`)
+
   await cmdLock()
 }
 
@@ -465,6 +510,96 @@ async function cmdStats() {
   console.log(`  mc-derived/${version}  不可重建，入库中：${human(derived.bytes)} / ${derived.files} 个文件\n`)
 }
 
+/**
+ * 版本清单里的音效计数，以**实际落盘的清单**为准。
+ *
+ * @why fetch-assets 是按磁盘上的 .ogg 文件数统计音效的。CI 用 `--no-sounds`
+ *      提取素材，音频不落盘，于是 versions.json 里根本没有 sounds 这一行，
+ *      首页读到 0，写「0 个 · 仅清单」；音效页却列着 4961 条。同一份数据两个数。
+ * @constraint 不能改成让首页自己去数 sounds.json：那是 515KB，首页只需要一个
+ *      数字。registrySummary 存在的意义就是别为计数拉整份清单。
+ * @constraint 开发态也要跑（sync 里调用），否则本地永远看不到真实数字，
+ *      误以为首页文案有 bug，而线上其实是对的。
+ */
+async function applySoundSummary(assetsDir, versionsFile) {
+  const soundsList = path.join(assetsDir, 'sounds.json')
+  if (!(await exists(versionsFile)) || !(await exists(soundsList))) return 0
+  try {
+    const manifest = await readJson(soundsList)
+    const total = Array.isArray(manifest.items) ? manifest.items.length : 0
+    if (!total) return 0
+    // @why 音频是否真的随包分发，决定首页敢不敢写「可试听」
+    const audio = await readdir(path.join(assetsDir, 'sounds')).then(
+      (names) => (names.some((name) => name.endsWith('.ogg')) ? 1 : 0),
+      () => 0,
+    )
+    const all = await readJson(versionsFile)
+    const version = path.basename(assetsDir)
+    const entry = (all.versions ?? []).find((item) => item.id === version)
+    if (!entry) return 0
+    const summary = entry.registrySummary ?? []
+    const row = summary.find((item) => item.id === 'sounds')
+    if (row) {
+      row.count = total
+      row.audio = audio
+    } else {
+      summary.push({ id: 'sounds', label: '音效', kind: 'asset', count: total, route: '/sounds', audio })
+    }
+    entry.registrySummary = summary
+    await writeFile(versionsFile, JSON.stringify(all))
+    return total
+  } catch {
+    // @why 清单结构异常时保持原样。首页少一个数字可以接受，为此中断 sync 不行
+    return 0
+  }
+}
+
+/**
+ * 注册表路由归一化：`/registries/xxx` → `/data/xxx`。
+ *
+ * @why 早期 fetch-assets 把效果与粒子挂在 `/registries/` 下，后来数据页统一到
+ *      `/data/`，但已经生成好的 registries.json 与 versions.json 里还留着旧前缀。
+ *      首页的「数据总览」点进去要过一次客户端重定向，地址栏还会先闪一下旧路径。
+ * @constraint 两边都要改：registries.json 决定 Data 页的链接，versions.json
+ *      决定首页折叠区里的链接，只改一处会得到两个不一致的入口。
+ */
+async function normalizeRegistryRoutes(assetsDir, versionsFile) {
+  let fixed = 0
+  const rewrite = (route) => {
+    if (typeof route !== 'string' || !route.startsWith('/registries/')) return route
+    fixed += 1
+    return route.replace('/registries/', '/data/')
+  }
+  const regsFile = path.join(assetsDir, 'registries.json')
+  if (await exists(regsFile)) {
+    const regs = await readJson(regsFile)
+    let touched = false
+    for (const registry of regs.registries ?? []) {
+      const next = rewrite(registry.route)
+      if (next !== registry.route) {
+        registry.route = next
+        touched = true
+      }
+    }
+    if (touched) await writeFile(regsFile, JSON.stringify(regs))
+  }
+  if (await exists(versionsFile)) {
+    const all = await readJson(versionsFile)
+    let touched = false
+    for (const entry of all.versions ?? []) {
+      for (const row of entry.registrySummary ?? []) {
+        const next = rewrite(row.route)
+        if (next !== row.route) {
+          row.route = next
+          touched = true
+        }
+      }
+    }
+    if (touched) await writeFile(versionsFile, JSON.stringify(all))
+  }
+  return fixed
+}
+
 async function cmdPack() {
   const version = await currentVersion()
   if (!version) {
@@ -503,47 +638,12 @@ async function cmdPack() {
   await normalizeItemGroups(mcDir)
   await normalizeIcons(mcDir)
 
-  /**
-   * 音效计数以实际分发的清单为准。
-   *
-   * @why CI 用 `--no-sounds` 提取素材，.ogg 不落盘，fetch-assets 是按磁盘文件
-   *      统计音效数的，于是 versions.json 里 soundCount 成了 0。而 derived 的
-   *      sounds.json 是入库清单，条目数照旧打进站点。结果是首页写「音效 0 个」、
-   *      音效页却列着 4961 条，同一份数据两个数。
-   * @constraint 不能改成让首页去读 sounds.json 自己数：那是 515KB，首页只需要
-   *      一个数字，registrySummary 存在的意义就是别为计数拉整份清单。
-   */
+  // 音效计数与注册表路由：开发态由 sync 做同一件事，见 applySoundSummary
   const versionsOut = path.join(outDir, 'mc', 'versions.json')
-  const soundsList = path.join(mcDir, 'sounds.json')
-  if ((await exists(versionsOut)) && (await exists(soundsList))) {
-    try {
-      const manifest = JSON.parse(await readFile(soundsList, 'utf8'))
-      const total = Array.isArray(manifest.items) ? manifest.items.length : 0
-      // 音频是否真的随包分发：决定首页敢不敢写「可试听」
-      const audio = await readdir(path.join(mcDir, 'sounds')).then(
-        (names) => (names.length > 0 ? 1 : 0),
-        () => 0,
-      )
-      if (total > 0) {
-        const all = JSON.parse(await readFile(versionsOut, 'utf8'))
-        const entry = (all.versions ?? []).find((item) => item.id === version)
-        if (entry) {
-          const summary = entry.registrySummary ?? []
-          const row = summary.find((item) => item.id === 'sounds')
-          if (row) {
-            row.count = total
-            row.audio = audio
-          } else {
-            summary.push({ id: 'sounds', label: '音效', kind: 'asset', count: total, route: '/sounds', audio })
-          }
-          entry.registrySummary = summary
-          await writeFile(versionsOut, JSON.stringify(all))
-        }
-      }
-    } catch {
-      // @why 清单结构异常时保持原样。首页少一个数字可以接受，为此中断部署不行
-    }
-  }
+  const sounds = await applySoundSummary(mcDir, versionsOut)
+  if (sounds) log(`音效计数 ${sounds} 条`)
+  const routes = await normalizeRegistryRoutes(mcDir, versionsOut)
+  if (routes) log(`注册表路由修正 ${routes} 处`)
 
   // @why 构建插件已经生成过；这里兜底，避免旧 dist 没有 404.html 时静态托管深链接直接断
   const notFound = path.join(outDir, '404.html')

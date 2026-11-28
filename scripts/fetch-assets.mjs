@@ -1122,7 +1122,7 @@ async function buildRegistries(outDir, version) {
       label: '状态效果',
       kind: 'registry',
       source: 'lang: effect.minecraft.*',
-      route: '/registries/effects',
+      route: '/data/effects',
       count: effectIds.length,
       entries: effectIds.map((id) => {
         const name = label(`effect.minecraft.${id}`, id)
@@ -1143,7 +1143,7 @@ async function buildRegistries(outDir, version) {
       label: '粒子',
       kind: 'registry',
       source: 'assets/minecraft/particles',
-      route: '/registries/particles',
+      route: '/data/particles',
       count: particleIds.length,
       entries: particleIds.map((id) => ({ id, n: id, e: null })),
     })

@@ -38,6 +38,101 @@ pnpm run setup -- --cdn=https://bmclapi2.bangbang93.com/assets
 pnpm run setup:lite   # 下载约 130MB，落盘 145MB；完整版再多半 GB 音效
 ```
 
+## 前端结构
+
+页面按功能切分在 `src/features/` 下，样式与控件按层收在 `src/ui/` 与 `src/styles/`。
+一条规则：**页面只描述内容，不描述长相**——长相全部来自基元层，改一处全站生效。
+
+```
+src/
+├── features/            一个目录 = 一个页面（含它自己的 .css）
+│   ├── home/            首页：入口、统计
+│   ├── blocks/          方块
+│   ├── items/           物品（分类来自创造栏）
+│   ├── entities/        生物
+│   ├── particles/       粒子
+│   ├── textures/        贴图文件
+│   ├── sounds/          音效
+│   ├── structures/      结构（窄列表 + 大画布）
+│   ├── data/            数据总览 + 注册表详情
+│   ├── workbench/       界面工作台（容器 / 告示牌 / 书 / 地图）
+│   ├── text3d/          立体字
+│   └── notfound/        404
+├── ui/                  设计系统：不含业务知识
+│   ├── Page.tsx         Page / PageHeader / Section / EmptyState / LoadingState / ErrorState
+│   ├── Toolbar.tsx      粘性工具栏（搜索独占一行，分类在下一行）
+│   ├── SearchField.tsx  搜索框（/ 聚焦、Esc 清空、清空按钮）
+│   ├── FilterChips.tsx  分类筛选（链接或按钮两种模式）
+│   ├── AssetGrid.tsx    网格容器（虚拟化由 useVirtualGrid 驱动）
+│   ├── AssetTile.tsx    唯一的卡片：缩略区 + 单行名称 + 可选副标题
+│   ├── Dialog.tsx       唯一的弹窗：portal / Esc / 滚动锁 / 焦点圈定 / 退场
+│   ├── Button.tsx       按钮
+│   └── Switch.tsx       开关
+├── styles/
+│   ├── tokens.css       颜色、间距、字号、圆角、阴影、层级（浅/深两套）
+│   ├── base.css         重置、排版、焦点、滚动条
+│   ├── layout.css       外壳、顶栏、页面容器、页头、页脚
+│   ├── ui.css           基元：btn / input / chip / tile / grid / modal / table / state
+│   ├── studio.css       工作室布局（立体字与告示牌/书/地图共用）
+│   ├── workbench.css    工作台外壳（画布几何仍在 legacy 里）
+│   └── legacy-workbench.css  旧画布与弹窗内部结构（迁移中，勿新增规则）
+├── components/          跨页共享的渲染组件（ModelView / ModelModal / 各类面板）
+├── lib/                 数据加载、几何、动画、导出
+└── render/              WebGL2 管线与 CPU 光栅化
+```
+
+### 写新页面时照这个来
+
+| 需要什么 | 用什么 | 不要 |
+|---|---|---|
+| 页面外边距 | `<Page>` / `<Page wide>` | 自己写 `max-width` + `padding` |
+| 标题与面包屑 | `<PageHeader back title lead>` | 手写 `.page-head` |
+| 搜索 + 筛选 | `<Toolbar>` + `<SearchField>` + `<FilterChips>` | 把搜索框和 chips 塞进同一个 flex 行 |
+| 列表 | `<AssetGrid>` + `<useVirtualGrid>` + `<AssetTile>` | 新写一套 `.xxx-cell` |
+| 详情 | `<Dialog>` + `.modal__view` / `.modal__side` | 自己写遮罩、Esc、滚动锁 |
+| 查询参数 | `useQueryParam()` | 每页复制一份 `updateQuery` |
+| 空 / 加载 / 出错 | `<EmptyState>` / `<LoadingState>` / `<ErrorState>` | 一行灰字 |
+
+### 这次重构修掉的问题
+
+- **物品分类**：`sync` 只把派生数据留在 `mc-derived/`，开发态读的 `items.json` 里 `groups`
+  只有一项，物品页顶部只有「全部 / 未分类」。现在 `sync` 会把 `creativetabs.json`
+  放进素材目录并重跑分组归一化，本地与线上一致（12 个分类）。
+- **搜索框塌陷**：音效页 14 个分类 chips 把同行的搜索框挤成 30px 宽。工具栏改成两行，
+  搜索框独占一行并设上限。
+- **弹窗行为不一致**：`ModelModal` 没有 Esc、不锁背景滚动，`TextureDetail` 有；
+  三个弹窗各写一套退场动画。统一到 `Dialog`。
+- **弹窗信息被压扁**：右侧是滚动容器，flex 子项默认 `shrink:1`，键值表被压到 2px。
+- **面板控件被压扁**：立体字页的 `textarea` 被压成一条、滑块溢出面板，同样原因。
+- **虚拟网格错位**：行高写死 118/120 与 CSS 实际高度不符；过滤后视口停在旧位置。
+  现在实测行高，并在筛选条件变化时回到网格顶部。
+- **纹理缩略图过小**：`img` 按固有尺寸排，16×16 的贴图在 96px 格子里只有一个点。
+- **粒子卡片参差**：名称两行、meta 换行把行高撑开。卡片高度固定，名称单行省略。
+- **结构页脱节**：没有页面容器、搜索框是裸 `input`、列表与画布都没有卡片边界。
+- **工作台手机端**：容器条竖排吃掉整屏、画布被压到 0；现在回到横排滚动。
+- **顶部导航溢出**：最后一页被硬切，加渐隐提示。
+- **首页音效 0 个**：`versions.json` 的音效数按磁盘上的 `.ogg` 统计，`--no-sounds`
+  的素材里一条都没有，于是首页写「0 个」而音效页列着 4961 条。计数改为读实际
+  分发的 `sounds.json`，并由 `sync` 与 `pack` 共用同一个函数写入。
+- **开发态音效页空白**：派生清单 `mc-derived/sounds.json`（含官方字幕中文名）
+  以前只在 `pack` 阶段覆盖进素材，本地 dev 读到的是空清单。现在 `sync` 也覆盖。
+- **注册表旧路由**：`/registries/effects`、`/registries/particles` 统一到
+  `/data/effects`、`/data/particles`，不再靠客户端重定向兜。
+- **状态条样式串台**：工作台状态条与空状态块共用 `.state`，新基元层把状态条
+  撑成 64px 内边距的居中空态。状态条改名 `.statebar`，两套语义彻底分开。
+- **提示条被拆成竖列**：`.notice` 原本是 `display:flex`，里面的行内 `<span class="mono">`
+  变成独立列，手机上整段提示碎成几条竖排文字。改为块级排版。
+- **注册表卡片重复字符串**：粒子和部分效果没有中文名，`n` 就是注册 id，
+  卡片上同一个字符串印两遍。名字与 id 相同时不再画副标题。
+- **导出失败用 `alert`**：原生弹窗会截断长报错，关掉就没了。改成面板内的
+  可关闭提示条。
+- **首页统计折行错位**：`flex-wrap` 下第二行只有两项、宽度还跟着内容变，
+  手机上六个数字歪成两截。改成网格，桌面 6 列、手机 3 列。
+- **加载态各写一套**：路由懒加载用灰字、部分页面用 `state__hint` 拼空态、
+  少数页面用 `<p className="empty">`。统一到 `LoadingState` / `EmptyState`。
+- **404 的返回按钮**：从站外直接打开详情链接时 `history.back()` 无处可回，
+  按钮点了没反应。改成显式 `Link`。
+
 ## 目录
 
 | 路径 | 说明 | 入库 |

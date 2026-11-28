@@ -1,0 +1,178 @@
+/*
+ * 结构页：窄列表 + 大画布。
+ * @why 列表与画布各自滚动：1511 个结构跟着整页滚，预览区会跑出屏幕，
+ *      来回拖动时既看不到选中的是哪一个、也看不到模型。
+ */
+
+.num {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.struct {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.struct__list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: calc(100dvh - var(--topbar-h) - 220px);
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.struct__item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 6px 10px;
+  border-radius: var(--radius-sm);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+}
+
+.struct__item:hover {
+  background: var(--surface-muted);
+}
+
+.struct__item--on {
+  background: var(--accent-muted);
+}
+
+.struct__name {
+  overflow: hidden;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.struct__item--on .struct__name {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.struct__meta {
+  overflow: hidden;
+  color: var(--text-subtle);
+  font-size: var(--text-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* 预览区 */
+
+.struct__stage {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.struct__canvas {
+  /* @constraint 用固定高度 + object-fit，而不是 aspect-ratio + max-height：
+      后者在宽屏上会先按宽度撑成 900×900，再被 max-height 压扁，
+      结果画布两侧留出大片空白，看起来像渲染没铺满。 */
+  width: 100%;
+  height: clamp(280px, 54vh, 520px);
+  object-fit: contain;
+  background: var(--surface-muted);
+  cursor: grab;
+}
+
+.struct__canvas:active {
+  cursor: grabbing;
+}
+
+.struct__status {
+  padding: var(--space-2) var(--space-4);
+  color: var(--text-subtle);
+  font-size: var(--text-xs);
+  line-height: 1.5;
+}
+
+.struct__hollow {
+  color: var(--text-muted);
+}
+
+.struct__export {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4) var(--space-3);
+  border-top: 1px solid var(--border);
+}
+
+.struct__export-label {
+  color: var(--text-subtle);
+  font-size: var(--text-xs);
+}
+
+.struct__export-field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-subtle);
+  font-size: var(--text-xs);
+}
+
+.struct__export-field select {
+  height: 26px;
+  padding: 0 24px 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  font-size: var(--text-xs);
+  appearance: none;
+  background-image: linear-gradient(45deg, transparent 50%, currentcolor 50%),
+    linear-gradient(135deg, currentcolor 50%, transparent 50%);
+  background-position:
+    calc(100% - 12px) 50%,
+    calc(100% - 8px) 50%;
+  background-size: 4px 4px;
+  background-repeat: no-repeat;
+}
+
+.struct__export-note {
+  color: var(--text-subtle);
+  font-size: var(--text-xs);
+}
+
+@media (max-width: 900px) {
+  .struct {
+    grid-template-columns: 1fr;
+  }
+
+  /* @why 手机上列表必须排在预览前面：预览占掉一屏时，用户看不到有哪些结构，
+      只能盲滚。列表压到 180px 之后先露出可选项，再往下看模型。 */
+  .struct__list {
+    order: 0;
+    max-height: 180px;
+  }
+
+  .struct__stage {
+    order: 1;
+  }
+
+  .struct__canvas {
+    height: 46vh;
+  }
+}

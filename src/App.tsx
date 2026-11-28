@@ -1,7 +1,8 @@
 import { Suspense, lazy, type ReactNode } from 'react'
 import { BrowserRouter, Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from '@/components/AppShell'
-import Home from '@/pages/Home'
+import { LoadingState } from '@/ui'
+import Home from '@/features/home/Home'
 import { useCursors } from '@/lib/useCursors'
 
 /**
@@ -11,18 +12,18 @@ import { useCursors } from '@/lib/useCursors'
  * 首屏 920KB，慢网络下 35 秒看不到任何东西。拆成路由级 chunk 之后首页只带
  * vendor + 首页自己的代码，点进方块页才去下渲染层。
  */
-const Blocks = lazy(() => import('@/pages/Blocks'))
-const Items = lazy(() => import('@/pages/Items'))
-const Entities = lazy(() => import('@/pages/Entities'))
-const Particles = lazy(() => import('@/pages/Particles'))
-const Structures = lazy(() => import('@/pages/Structures'))
-const Sounds = lazy(() => import('@/pages/Sounds'))
-const Browse = lazy(() => import('@/pages/Browse'))
-const Data = lazy(() => import('@/pages/Data'))
-const Registry = lazy(() => import('@/pages/Registry'))
-const Ui = lazy(() => import('@/pages/Ui'))
-const Text3D = lazy(() => import('@/pages/Text3D'))
-const NotFound = lazy(() => import('@/pages/NotFound'))
+const Blocks = lazy(() => import('@/features/blocks/Blocks'))
+const Items = lazy(() => import('@/features/items/Items'))
+const Entities = lazy(() => import('@/features/entities/Entities'))
+const Particles = lazy(() => import('@/features/particles/Particles'))
+const Structures = lazy(() => import('@/features/structures/Structures'))
+const Sounds = lazy(() => import('@/features/sounds/Sounds'))
+const Browse = lazy(() => import('@/features/textures/Browse'))
+const Data = lazy(() => import('@/features/data/Data'))
+const Registry = lazy(() => import('@/features/data/Registry'))
+const Ui = lazy(() => import('@/features/workbench/Ui'))
+const Text3D = lazy(() => import('@/features/text3d/Text3D'))
+const NotFound = lazy(() => import('@/features/notfound/NotFound'))
 
 /**
  * @constraint Suspense 要逐个路由包，不能包在 `<Routes>` 外面。
@@ -30,7 +31,17 @@ const NotFound = lazy(() => import('@/pages/NotFound'))
  *      fallback 顶掉，切换页面闪过一整屏空白；包在单个路由里只影响内容区。
  */
 function page(node: ReactNode) {
-  return <Suspense fallback={<p className="empty">加载中…</p>}>{node}</Suspense>
+  return (
+    <Suspense
+      fallback={
+        <div className="page">
+          <LoadingState />
+        </div>
+      }
+    >
+      {node}
+    </Suspense>
+  )
 }
 
 export default function App() {

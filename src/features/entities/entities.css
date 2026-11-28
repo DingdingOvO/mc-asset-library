@@ -1,0 +1,7 @@
+/* 生物页：网格与卡片来自基元层，这里只保留数量高亮 */
+
+.num {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}

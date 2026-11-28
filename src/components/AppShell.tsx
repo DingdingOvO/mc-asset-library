@@ -1,6 +1,23 @@
 import { Link, NavLink, Outlet, useLocation } from 'react-router-dom'
 import { ThemeToggle } from './ThemeToggle'
 
+/**
+ * 一级导航。
+ * @why 抽成数据：顶栏与后续可能加的移动端菜单、页脚都需要同一份清单，
+ *      写两遍必然漏一项。
+ */
+const NAV = [
+  { to: '/items', label: '物品' },
+  { to: '/blocks', label: '方块' },
+  { to: '/entities', label: '生物' },
+  { to: '/particles', label: '粒子' },
+  { to: '/structures', label: '结构' },
+  { to: '/ui', label: '界面' },
+  { to: '/text3d', label: '立体字' },
+  { to: '/data', label: '数据' },
+  { to: '/sounds', label: '音效' },
+] as const
+
 export function AppShell() {
   /**
    * @why 给 main 换 key：路由一变就重建这个容器，入场动画才会重放。
@@ -12,19 +29,12 @@ export function AppShell() {
 
   /**
    * 工作台页面占满视口，不显示页脚。
-   * @why `/ui` 的外壳高度是 `100dvh - 顶栏`，页脚再占 60px 就会多出一条滚动条：
-   *      整块画布永远露出半截页脚，看起来像布局没对齐。
-   */
-  /**
-   * @why 立体字页也算 fullBleed：它和界面工作台一样是「一整屏的工具」，
-   *      而不是可滚动的列表页。不锁高度的话 studio 的 grid 高度由内容撑开，
-   *      预览台会变成一条固定高度的窄带，下面拖出一条没用的滚动条。
+   * @why `/ui` 的外壳高度是 `100dvh - 顶栏`，页脚再占 60px 就会多出一条滚动条。
    */
   const fullBleed = pathname === '/ui' || pathname === '/text3d'
 
   return (
     <div className={fullBleed ? 'shell shell--full' : 'shell'}>
-
       <header className="topbar">
         <Link to="/" className="topbar__brand">
           <span className="topbar__mark" aria-hidden="true">
@@ -33,42 +43,22 @@ export function AppShell() {
           MC 素材库
         </Link>
 
-        <nav className="topbar__nav">
-          <NavLink to="/items" className="topbar__link">
-            物品
-          </NavLink>
-          <NavLink to="/blocks" className="topbar__link">
-            方块
-          </NavLink>
-          <NavLink to="/entities" className="topbar__link">
-            生物
-          </NavLink>
-          <NavLink to="/particles" className="topbar__link">
-            粒子
-          </NavLink>
-          <NavLink to="/structures" className="topbar__link">
-            结构
-          </NavLink>
-          <NavLink to="/ui" className="topbar__link">
-            界面
-          </NavLink>
-          <NavLink to="/text3d" className="topbar__link">
-            立体字
-          </NavLink>
-          <NavLink to="/data" className="topbar__link">
-            数据
-          </NavLink>
-          <NavLink to="/sounds" className="topbar__link">
-            音效
-          </NavLink>
+        <nav className="topbar__nav" aria-label="主导航">
+          {NAV.map((item) => (
+            <NavLink key={item.to} to={item.to} className="topbar__link">
+              {item.label}
+            </NavLink>
+          ))}
         </nav>
 
         <span className="topbar__spacer" />
         <ThemeToggle />
       </header>
+
       <main key={pathname}>
         <Outlet />
       </main>
+
       <footer className="footer">
         <span>
           素材版权归 Mojang Studios 与 Microsoft 所有，本站为视频制作与学习提供素材参考，非官方站点。

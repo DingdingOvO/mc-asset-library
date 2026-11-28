@@ -1,0 +1,64 @@
+/*
+ * 立体字页专属样式：全屏布局 + 深色预览台 + 点阵输入框。
+ * 面板、控件、舞台的通用部分在 styles/studio.css。
+ */
+
+.studio-page {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  height: calc(100dvh - var(--topbar-h));
+  min-height: 0;
+  padding: var(--space-5) var(--content-pad) var(--space-4);
+}
+
+.studio-page .page-head {
+  margin-bottom: 0;
+}
+
+.studio-page .page-lead {
+  max-width: 92ch;
+}
+
+.studio-page .studio {
+  padding: 0;
+}
+
+/*
+ * @why 深色底：这一页要展示的只有六个面的明暗差。默认材质是白混凝土、石英这类
+ *      浅色，浅底浅字的结果是一片白，立体感全靠描边撑着。
+ * @constraint 不能纯黑：默认观感是「白方块 + 黑描边」，纯黑底上描边直接融进背景。
+ */
+.studio-stage--dark {
+  background-color: #3c424b;
+  background-image: radial-gradient(120% 90% at 50% 0%, #4b525d 0%, #333941 68%);
+}
+
+.studio-stage--dark .studio-canvas {
+  filter: drop-shadow(0 18px 34px rgb(0 0 0 / 45%));
+}
+
+/* @why 输入框里看到的折行位置必须和导出图一致，所以用同一份点阵字 */
+.studio-textarea {
+  min-height: 84px;
+  font-family: var(--font-pixel);
+  font-size: 16px;
+  line-height: 20px;
+  letter-spacing: 0;
+}
+
+.studio-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+@media (max-width: 900px) {
+  .studio-page {
+    padding: var(--space-3);
+  }
+
+  .studio-page .studio {
+    grid-template-rows: minmax(0, 1fr) 240px;
+  }
+}

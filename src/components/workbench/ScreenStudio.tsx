@@ -145,7 +145,15 @@ function loadImage(src: string): Promise<HTMLImageElement | null> {
   })
 }
 
-export function ScreenStudio({ version, kind }: { version: string; kind: ScreenKind }) {
+export function ScreenStudio({
+  version,
+  kind,
+  tabs,
+}: {
+  version: string
+  kind: ScreenKind
+  tabs?: React.ReactNode
+}) {
   const [font, setFont] = useState<GlyphFont | null>(null)
   const [images, setImages] = useState<Map<string, HTMLImageElement>>(new Map())
 
@@ -476,6 +484,8 @@ export function ScreenStudio({ version, kind }: { version: string; kind: ScreenK
   }
 
   return (
+    <div className="studio-shell">
+      {tabs && <header className="studio-bar">{tabs}</header>}
     <div className="studio">
       <aside className="studio__panel">
         {kind === 'sign' && (
@@ -860,6 +870,7 @@ export function ScreenStudio({ version, kind }: { version: string; kind: ScreenK
           </p>
         )}
       </div>
+    </div>
     </div>
   )
 }

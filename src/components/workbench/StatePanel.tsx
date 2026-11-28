@@ -40,7 +40,7 @@ export function StatePanel({
   const [open, setOpen] = useState(() => typeof window === 'undefined' || window.innerWidth >= 900)
 
   return (
-    <div className="state" onPointerDown={(event) => event.stopPropagation()}>
+    <div className="statebar" onPointerDown={(event) => event.stopPropagation()}>
       <div className="state__head">
         <button
           type="button"

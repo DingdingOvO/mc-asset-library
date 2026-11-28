@@ -1,0 +1,12 @@
+/* 纹理页：缩略图在棋盘格上居中，尺寸信息走 tile__meta */
+
+.num {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+.tile__thumb--checker img {
+  /* 8×8 的界面小图放大到 132 格仍要锐利 */
+  image-rendering: pixelated;
+}

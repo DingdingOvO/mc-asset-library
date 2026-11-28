@@ -1,0 +1,7 @@
+/* 物品页：布局全部由 PageHeader / Toolbar / AssetGrid 承担，这里只补文案 */
+
+.num {
+  color: var(--text);
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}

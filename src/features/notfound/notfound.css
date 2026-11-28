@@ -1,0 +1,35 @@
+/* 404：给一个明确出口，而不是一行灰字 */
+
+.notfound {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
+  max-width: 460px;
+  padding: clamp(48px, 14vh, 140px) 0;
+}
+
+.notfound__code {
+  color: var(--text-subtle);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  letter-spacing: 0.08em;
+}
+
+.notfound__title {
+  font-size: var(--text-2xl);
+  font-weight: 650;
+  letter-spacing: -0.02em;
+}
+
+.notfound__hint {
+  color: var(--text-muted);
+  font-size: var(--text-base);
+  line-height: 1.65;
+}
+
+.notfound__actions {
+  display: flex;
+  gap: var(--space-2);
+  margin-top: var(--space-3);
+}

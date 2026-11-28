@@ -1,0 +1,270 @@
+/**
+ * 版面层：外壳、顶栏、页面容器、页脚。
+ * 这一层只负责「东西放在哪」，不负责按钮长什么样。
+ */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  min-height: 100dvh;
+  background: var(--bg);
+}
+
+/* 顶栏 */
+
+.topbar {
+  position: sticky;
+  top: 0;
+  z-index: var(--z-sticky);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  height: var(--topbar-h);
+  padding: 0 var(--content-pad);
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter: saturate(180%) blur(10px);
+}
+
+.topbar__brand {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: var(--text-base);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  white-space: nowrap;
+}
+
+.topbar__mark {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  border-radius: var(--radius-sm);
+  background: var(--text);
+  color: var(--bg);
+  font-family: var(--font-mono);
+  font-size: var(--text-xs);
+  font-weight: 700;
+}
+
+.topbar__nav {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+  margin-left: var(--space-2);
+  overflow-x: auto;
+  scrollbar-width: none;
+  /* @why 右侧渐隐：导航放不下时最后一项会被硬切在边缘，看起来像样式坏了。
+      渐隐之后「还有内容」这件事是看得见的，而滚动条在 56px 高的栏里太吵。 */
+  mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 24px), transparent);
+}
+
+.topbar__nav::-webkit-scrollbar {
+  display: none;
+}
+
+.topbar__link {
+  flex: 0 0 auto;
+  padding: 5px 10px;
+  border-radius: var(--radius-sm);
+  color: var(--text-muted);
+  font-size: var(--text-base);
+  transition:
+    background var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+}
+
+.topbar__link:hover {
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.topbar__link.active {
+  background: var(--surface-muted);
+  color: var(--text);
+  font-weight: 500;
+}
+
+.topbar__spacer {
+  flex: 1;
+}
+
+/* 页面容器 */
+
+.page {
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0 auto;
+  padding: var(--space-8) var(--content-pad) var(--space-16);
+}
+
+.page--wide {
+  max-width: 1560px;
+}
+
+.page--flush {
+  max-width: none;
+  padding-inline: var(--content-pad);
+}
+
+/* 页头 */
+
+.page-head {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  margin-bottom: var(--space-6);
+}
+
+.crumbs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  color: var(--text-subtle);
+  font-size: var(--text-sm);
+}
+
+.crumbs a {
+  color: var(--text-muted);
+  transition: color var(--dur-fast) ease;
+}
+
+.crumbs a:hover {
+  color: var(--text);
+}
+
+.crumbs__sep {
+  color: var(--text-subtle);
+}
+
+.page-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-3);
+  justify-content: space-between;
+}
+
+.page-title h1 {
+  font-size: var(--text-2xl);
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  line-height: 1.25;
+}
+
+.page-lead {
+  color: var(--text-muted);
+  font-size: var(--text-base);
+  line-height: 1.6;
+}
+
+.page-lead .mono {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.page-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/* 页脚 */
+
+.footer {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+  justify-content: center;
+  margin-top: auto;
+  padding: var(--space-5) var(--content-pad);
+  border-top: 1px solid var(--border);
+  color: var(--text-subtle);
+  font-size: var(--text-xs);
+  text-align: center;
+}
+
+.footer__build {
+  font-family: var(--font-mono);
+}
+
+/*
+ * 全屏工具页（界面工作台 / 立体字）。
+ * @constraint 高度必须锁死：这两页内部自己滚动，外层再出一条整页滚动条就会
+ *      出现「画布下半截被页脚顶掉」的错觉。
+ */
+.shell--full .footer {
+  display: none;
+}
+
+.shell--full > main {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.shell > main {
+  position: relative;
+  z-index: 1;
+  flex: 1;
+}
+
+/* 页面入场 */
+@keyframes page-in {
+  from {
+    opacity: 0;
+    translate: 0 4px;
+  }
+}
+
+.shell > main {
+  animation: page-in 0.24s var(--ease-out);
+}
+
+@media (max-width: 900px) {
+  :root {
+    --content-pad: 20px;
+  }
+
+  .page {
+    padding-top: var(--space-6);
+  }
+}
+
+@media (max-width: 720px) {
+  :root {
+    --content-pad: 16px;
+  }
+
+  .topbar {
+    gap: var(--space-2);
+    padding: 0 var(--content-pad);
+  }
+
+  /* 窄屏宽度留给导航，品牌只留标记 */
+  .topbar__brand {
+    font-size: 0;
+    gap: 0;
+  }
+
+  .topbar__mark {
+    width: 26px;
+    height: 26px;
+  }
+
+  .topbar__link {
+    padding: 5px 8px;
+    font-size: var(--text-sm);
+  }
+
+  .page-title h1 {
+    font-size: var(--text-xl);
+  }
+}

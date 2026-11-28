@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom'
+import type { ReactNode } from 'react'
 import { RedoIcon, UndoIcon } from '@/components/icons'
 import type { ExportBackdrop } from '@/lib/containerRender'
 import type { PinnedTip } from '@/lib/exportLayers'
@@ -28,6 +28,8 @@ import type { ExportTarget } from '@/lib/export/registry'
 const SCALES = [1, 2, 3, 4] as const
 
 export interface ToolbarProps {
+  /** 页签（容器工作台 / 告示牌 / 书 / 地图），与工具同处一行 */
+  tabs?: ReactNode
   canUndo: boolean
   canRedo: boolean
   onUndo: () => void
@@ -67,6 +69,7 @@ export interface ToolbarProps {
 
 export function Toolbar(props: ToolbarProps) {
   const {
+    tabs,
     canUndo,
     canRedo,
     onUndo,
@@ -100,14 +103,11 @@ export function Toolbar(props: ToolbarProps) {
   const modernTouched = modern.enabled
   return (
     <header className="workbench__bar">
-      <Link to="/" className="text-link workbench__back">
-        ← 首页
-      </Link>
-      <h1 className="workbench__title">界面工作台</h1>
+      {tabs}
+      <span className="workbench__spacer" />
       <span className="workbench__meta">
         {containerCount} 容器 · {itemCount} 物品
       </span>
-      <span className="workbench__spacer" />
 
       <div className="workbench__tools">
         <div className="workbench__group" role="group" aria-label="撤销与重做">

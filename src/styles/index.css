@@ -1,0 +1,13 @@
+/**
+ * 样式入口（新基元层）。
+ *
+ * @constraint 必须在页面组件之后加载：同特异性的规则靠后加载的那条生效。
+ *      调用点见 main.tsx —— legacy → App → index。
+ */
+
+@import './tokens.css';
+@import './base.css';
+@import './layout.css';
+@import './ui.css';
+@import './studio.css';
+@import './workbench.css';
