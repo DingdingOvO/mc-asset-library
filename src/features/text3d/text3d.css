@@ -1,6 +1,6 @@
 /*
- * 立体字页专属样式：全屏布局 + 深色预览台 + 点阵输入框。
- * 面板、控件、舞台的通用部分在 styles/studio.css。
+ * 立体字页专属样式：深色预览台 + 点阵输入框 + 落地光晕。
+ * 面板、控件、舞台、色板、分段控件的通用部分在 styles/ 下。
  */
 
 .studio-page {
@@ -17,7 +17,7 @@
 }
 
 .studio-page .page-lead {
-  max-width: 92ch;
+  max-width: 88ch;
 }
 
 .studio-page .studio {
@@ -25,22 +25,50 @@
 }
 
 /*
- * @why 深色底：这一页要展示的只有六个面的明暗差。默认材质是白混凝土、石英这类
- *      浅色，浅底浅字的结果是一片白，立体感全靠描边撑着。
- * @constraint 不能纯黑：默认观感是「白方块 + 黑描边」，纯黑底上描边直接融进背景。
+ * @why 深色底：这一页要展示的是六个面的明暗差。浅色材质放在浅底上，
+ *      正面和背景几乎同色，立体感只能靠描边撑着，看起来像一张贴纸。
+ * @constraint 不能纯黑：默认材质是白面 + 深色描边，纯黑底上描边直接融进背景，
+ *      字的轮廓会糊掉。用带一点蓝的中灰，描边还能读出层次。
  */
 .studio-stage--dark {
-  background-color: #3c424b;
-  background-image: radial-gradient(120% 90% at 50% 0%, #4b525d 0%, #333941 68%);
+  background-color: #363c46;
+  background-image:
+    radial-gradient(120% 90% at 50% -10%, #4d5563 0%, #363c46 62%, #2a2f38 100%),
+    linear-gradient(180deg, transparent 62%, rgb(0 0 0 / 14%) 100%);
 }
 
 .studio-stage--dark .studio-canvas {
-  filter: drop-shadow(0 18px 34px rgb(0 0 0 / 45%));
+  position: relative;
+  z-index: 1;
+  filter: drop-shadow(0 20px 38px rgb(0 0 0 / 42%));
+}
+
+/*
+ * 字的落地接触阴影。
+ *
+ * @why 只靠 canvas 上的 drop-shadow，字像悬在半空——投影是整体偏移的，
+ *      没有"踩在地上"的那一块更深的接触面。这里在舞台底部补一个模糊椭圆，
+ *      随水平转动左右挪一点，视觉上就把字和地面对上了。
+ * @constraint 必须在 canvas 下面（z-index 0），否则会盖住字面。
+ */
+.text3d-glow {
+  position: absolute;
+  bottom: 9%;
+  left: 50%;
+  z-index: 0;
+  width: 58%;
+  height: 16%;
+  margin-left: -29%;
+  border-radius: 50%;
+  background: radial-gradient(50% 50% at 50% 50%, rgb(0 0 0 / 62%) 0%, rgb(0 0 0 / 26%) 46%, transparent 72%);
+  filter: blur(14px);
+  pointer-events: none;
+  transition: transform 120ms linear;
 }
 
 /* @why 输入框里看到的折行位置必须和导出图一致，所以用同一份点阵字 */
 .studio-textarea {
-  min-height: 84px;
+  min-height: 76px;
   font-family: var(--font-pixel);
   font-size: 16px;
   line-height: 20px;
@@ -53,12 +81,23 @@
   gap: var(--space-2);
 }
 
+.studio-actions .btn {
+  flex: 1 1 auto;
+}
+
 @media (max-width: 900px) {
   .studio-page {
     padding: var(--space-3);
+    /* @constraint 手机上不要锁视口高度：面板内容长，锁住之后只能在小框里滚 */
+    height: auto;
   }
 
   .studio-page .studio {
-    grid-template-rows: minmax(0, 1fr) 240px;
+    grid-template-rows: minmax(0, 1fr) 260px;
+  }
+
+  /* 手机上先看字，再看参数 */
+  .studio-page .studio-stage {
+    order: -1;
   }
 }

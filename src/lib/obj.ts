@@ -17,6 +17,11 @@ export interface ObjResult {
 
 /** 贴图在包内的文件名：纹理 id 里的斜杠压成下划线，免得建目录 */
 export function textureFile(tex: string): string {
+  /**
+   * @why 内联贴图（data URL）不能当文件名：它有几 KB，写进文件名会把
+   *      ZIP 体积撑大、也可能超出文件系统限制。立体字的纯色材质就是这种。
+   */
+  if (tex.startsWith('data:')) return 'textures/inline.png'
   return `textures/${tex.replace(/\//g, '_')}.png`
 }
 

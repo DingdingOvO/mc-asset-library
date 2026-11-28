@@ -353,7 +353,7 @@ export function buildGltf(
     const imageIndex = images.push({ bufferView: imageView, mimeType: 'image/png' }) - 1
     const textureIndex = textures.push({ source: imageIndex, sampler: 0 }) - 1
     const index = materials.push({
-      name: tex,
+      name: tex.startsWith('data:') ? 'inline' : tex,
       pbrMetallicRoughness: {
         baseColorTexture: { index: textureIndex },
         metallicFactor: 0,

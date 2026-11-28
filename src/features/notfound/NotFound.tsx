@@ -7,9 +7,10 @@ export default function NotFound() {
     <Page>
       <div className="notfound">
         <p className="notfound__code">404</p>
-        <h1 className="notfound__title">这个页面不存在</h1>
+        <h1 className="notfound__title">这页大概被苦力怕炸了</h1>
         <p className="notfound__hint">
-          链接可能过期了，或者素材分类改过名字。从首页重新找一次会更快。
+          <span className="notfound__face">(´・ω・`)</span>
+          链接可能过期，或者分类改过名字。回首页重新找一次会更快。
         </p>
         <div className="notfound__actions">
           <Link to="/" className="btn btn--primary">

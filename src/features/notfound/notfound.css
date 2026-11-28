@@ -33,3 +33,13 @@
   gap: var(--space-2);
   margin-top: var(--space-3);
 }
+
+/* 那句颜文字：放大一点、当图标用，别让它混在正文里读成乱码 */
+.notfound__face {
+  display: inline-block;
+  margin-right: 6px;
+  color: var(--text-subtle);
+  font-family: var(--font-mono);
+  font-size: 1.05em;
+  white-space: nowrap;
+}

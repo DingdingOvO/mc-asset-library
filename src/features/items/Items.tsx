@@ -139,8 +139,8 @@ function ItemBrowser({ version, group }: { version: string; group: string }) {
         title={activeLabel}
         lead={
           <>
-            <span className="num">{filtered.length}</span> 项
-            {group === 'misc' ? ' · 注册表里有、创造模式物品栏没有的条目' : ' · 按创造模式物品栏的原生顺序排列'}
+            <span className="num">{filtered.length}</span> 件
+            {group === 'misc' ? ' · 注册表里有、创造栏里没有的条目' : ' · 顺序照创造栏来，翻起来和游戏里一样'}
           </>
         }
       />
@@ -174,8 +174,8 @@ function ItemBrowser({ version, group }: { version: string; group: string }) {
       {busy && <LoadingState label="正在加载物品模型…" />}
       {!busy && filtered.length === 0 && (
         <EmptyState
-          title={`没有匹配「${query}」的物品`}
-          hint="试试只输入英文 id 的一部分，例如 stone 或 sword。"
+          title={`没找到「${query}」这件物品`}
+          hint="输 id 的一部分就够了，比如 stone、sword、boat。"
         />
       )}
 

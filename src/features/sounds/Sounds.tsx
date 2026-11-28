@@ -159,8 +159,8 @@ function SoundBrowser({ version, canPlay }: { version: string; canPlay: boolean 
         title={activeLabel}
         lead={
           <>
-            <span className="num">{filtered.length}</span> 个音效
-            {group !== 'all' && <span className="muted"> · 全站 {items.length} 个</span>}
+            <span className="num">{filtered.length}</span> 条音效，名字用的是官方字幕那套中文
+            {group !== 'all' && <span className="muted"> · 全站 {items.length} 条</span>}
           </>
         }
       />
@@ -202,8 +202,8 @@ function SoundBrowser({ version, canPlay }: { version: string; canPlay: boolean 
       {loading && <LoadingState label="正在加载音效…" />}
       {!loading && filtered.length === 0 && (
         <EmptyState
-          title={`没有匹配「${query}」的音效`}
-          hint="可以搜中文名、路径或事件 id，例如 破坏、block.stone。"
+          title={`没找到「${query}」这个音效`}
+          hint="中文名、路径、事件 id 都能搜，比如 破坏、block.stone。"
         />
       )}
 

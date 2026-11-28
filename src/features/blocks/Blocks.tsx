@@ -135,7 +135,7 @@ function BlockBrowser({ version }: { version: string }) {
         title="方块"
         lead={
           <>
-            <span className="num">{filtered.length}</span> 个方块 · 按 blockstates 与模型 JSON 渲染的立体形态
+            <span className="num">{filtered.length}</span> 个方块，连半截的门和床都在 · 点一张能转着看
             {showHidden && <span className="muted"> · 含半截方块</span>}
           </>
         }
@@ -153,8 +153,8 @@ function BlockBrowser({ version }: { version: string }) {
 
       {!busy && filtered.length === 0 && (
         <EmptyState
-          title={`没有匹配「${query}」的方块`}
-          hint={showHidden === false ? '半截方块默认不显示，可以打开上面的开关再试。' : undefined}
+          title={`没找到「${query}」这块方块`}
+          hint={showHidden === false ? '换个英文 id 试试？半截方块默认藏着，把上面的开关打开也能看到。' : '用英文 id 的一部分就行，比如 stone、plank。'}
         />
       )}
 

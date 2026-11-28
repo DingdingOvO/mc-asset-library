@@ -79,7 +79,7 @@ function TextureBrowser({ version, group }: { version: string; group: string }) 
         title={activeLabel}
         lead={
           <>
-            <span className="num">{filtered.length}</span> 张纹理 · 原图直接下载，不经过缩放
+            <span className="num">{filtered.length}</span> 张纹理，原图直出 · 不缩不压，拿去就用
           </>
         }
       />
@@ -109,8 +109,8 @@ function TextureBrowser({ version, group }: { version: string; group: string }) 
       {loading && <LoadingState label="正在加载纹理…" />}
       {!loading && filtered.length === 0 && (
         <EmptyState
-          title={`没有匹配「${query}」的纹理`}
-          hint="可以试试英文文件名，例如 stone、wool、gui。"
+          title={`没找到「${query}」这张纹理`}
+          hint="纹理按文件名找，试试 stone、wool、gui 这种。"
         />
       )}
 

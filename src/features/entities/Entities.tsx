@@ -329,7 +329,7 @@ function EntityBrowser({ version }: { version: string }) {
         title="生物"
         lead={
           <>
-            <span className="num">{filtered.length}</span> 个实体 · {solid} 个可立体渲染 · 按游戏骨骼与动作
+            <span className="num">{filtered.length}</span> 个生物，其中 {solid} 个能立体渲染 · 会一直在动，点开能拆图层
           </>
         }
       />
@@ -344,8 +344,8 @@ function EntityBrowser({ version }: { version: string }) {
       {busy && <LoadingState label="正在解析骨骼与动作…" />}
       {!busy && filtered.length === 0 && (
         <EmptyState
-          title={`没有匹配「${query}」的生物`}
-          hint="可以试试 id 的一部分，例如 zombie、horse。"
+          title={`没找到「${query}」这只生物`}
+          hint="试试 zombie、horse、axolotl 这种 id 片段。"
         />
       )}
 

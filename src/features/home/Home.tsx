@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
-import { CubeIcon, ListIcon, SoundIcon } from '@/components/icons'
+import { CubeIcon, ListIcon, SoundIcon, TextIcon, WallIcon } from '@/components/icons'
 import { LoadingState, Page, SearchField } from '@/ui'
 import { useLibrary } from '@/lib/useLibrary'
+import { textureSrc } from '@/lib/mc'
 import './home.css'
 
 interface EntryProps {
@@ -23,13 +24,44 @@ function Entry({ to, label, count, unit, desc, icon }: EntryProps) {
       <span className="entry__body">
         <span className="entry__top">
           <span className="entry__label">{label}</span>
-          <span className="entry__count">
-            {count.toLocaleString('zh-CN')} {unit}
-          </span>
+          {/* @why 立体字和背景墙没有"条目数量"，写个 0 会让人以为坏了 */}
+          {count > 0 && (
+            <span className="entry__count">
+              {count.toLocaleString('zh-CN')} {unit}
+            </span>
+          )}
         </span>
         <span className="entry__desc">{desc}</span>
       </span>
     </Link>
+  )
+}
+
+/**
+ * 首屏右侧的方块拼贴。
+ *
+ * @why 固定挑九个对比度大的贴图：随机挑会抽到一堆灰石头，一整块糊在一起。
+ *      每格用 CSS 的 image-rendering: pixelated，16×16 的贴图放大也不糊。
+ */
+const COLLAGE = [
+  'block/oak_planks',
+  'block/stone_bricks',
+  'block/gold_block',
+  'block/diamond_block',
+  'block/bricks',
+  'block/emerald_block',
+  'block/prismarine_bricks',
+  'block/nether_bricks',
+  'block/quartz_block_side',
+]
+
+function HeroCollage({ version }: { version: string }) {
+  return (
+    <div className="hero__collage" aria-hidden="true">
+      {COLLAGE.map((id) => (
+        <img key={id} src={textureSrc(version, id)} alt="" loading="lazy" />
+      ))}
+    </div>
   )
 }
 
@@ -73,8 +105,8 @@ export default function Home() {
           </div>
           <h1 className="hero__title">Minecraft 素材库</h1>
           <p className="hero__lead">
-            做视频用的。模型在站内直接渲染、动画直接播放，不用开游戏对着看。
-            需要成图时，把界面摆出来、物品放进去，导出 PNG。
+            做视频、画封面、搭直播间的时候，总得先看清素材长什么样。
+            这里把方块、物品、生物、界面都搬进了浏览器——能转、能播、能导出，省得为了截一张图去开游戏。
           </p>
 
           <div className="hero__search">
@@ -99,6 +131,7 @@ export default function Home() {
             ))}
           </dl>
         </div>
+        {version && <HeroCollage version={version} />}
       </section>
 
       {error && <p className="notice notice--error">素材索引加载失败：{error.message}</p>}
@@ -112,7 +145,7 @@ export default function Home() {
               label="方块"
               count={blockCount}
               unit="个"
-              desc="按 blockstates 与模型渲染，火、水、岩浆的动画贴图按 frametime 走"
+              desc="连半截的门和床都在，火与岩浆按原版帧序动"
               icon={<CubeIcon />}
             />
             <Entry
@@ -120,7 +153,7 @@ export default function Home() {
               label="物品"
               count={itemCount}
               unit="项"
-              desc="创造模式物品栏的全部条目，含工具、盔甲、材料与刷怪蛋"
+              desc="创造栏里的全部条目，顺序也照着游戏来"
               icon={<CubeIcon />}
             />
             <Entry
@@ -128,7 +161,7 @@ export default function Home() {
               label="生物"
               count={entityCount}
               unit="个"
-              desc="按游戏骨骼与步态公式实时动作，详情里持续循环播放"
+              desc="按骨骼和步态公式走，点开能拆开图层看"
               icon={<CubeIcon />}
             />
             <Entry
@@ -136,8 +169,24 @@ export default function Home() {
               label="界面工作台"
               count={guiCount}
               unit="张底图"
-              desc="摆容器、放物品、导出成图——布局全部取自反编译源码"
+              desc="摆容器、放物品、导出成图，布局取自反编译源码"
               icon={<ListIcon />}
+            />
+            <Entry
+              to="/text3d"
+              label="立体字"
+              count={0}
+              unit=""
+              desc="给标题挤出厚度，透明底 PNG 直接压在背景墙上"
+              icon={<TextIcon />}
+            />
+            <Entry
+              to="/wall"
+              label="背景墙"
+              count={0}
+              unit=""
+              desc="方块纹理铺一面墙，比例和密度随手调"
+              icon={<WallIcon />}
             />
           </section>
 

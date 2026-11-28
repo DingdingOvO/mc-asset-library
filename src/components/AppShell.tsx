@@ -14,6 +14,7 @@ const NAV = [
   { to: '/structures', label: '结构' },
   { to: '/ui', label: '界面' },
   { to: '/text3d', label: '立体字' },
+  { to: '/wall', label: '背景墙' },
   { to: '/data', label: '数据' },
   { to: '/sounds', label: '音效' },
 ] as const
@@ -61,7 +62,7 @@ export function AppShell() {
 
       <footer className="footer">
         <span>
-          素材版权归 Mojang Studios 与 Microsoft 所有，本站为视频制作与学习提供素材参考，非官方站点。
+          素材版权归 Mojang Studios 与 Microsoft 所有 · 本站是非官方站点，为视频制作与学习提供参考
         </span>
         <span className="footer__build">构建 {__BUILD_TIME__.slice(0, 16).replace('T', ' ')}</span>
       </footer>

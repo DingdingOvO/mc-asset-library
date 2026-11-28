@@ -259,6 +259,13 @@
     height: 26px;
   }
 
+  /* @why 手机上导航项挤成一长条，字号和横向内边距各收一点，一屏能多露出两项，
+      剩下的靠横向滑动——总比每项都缩成两个字再说 */
+  .topbar__link {
+    padding: 5px 8px;
+    font-size: 13.5px;
+  }
+
   .topbar__link {
     padding: 5px 8px;
     font-size: var(--text-sm);

@@ -222,7 +222,7 @@ export default function Structures() {
         title="结构"
         lead={
           <>
-            <span className="num">{index.data?.count ?? 0}</span> 个原版结构 · 按 .nbt 逐格还原，铺地形预览
+            <span className="num">{index.data?.count ?? 0}</span> 个原版结构，一格一格从 .nbt 还原 · 拖动转着看
           </>
         }
       />

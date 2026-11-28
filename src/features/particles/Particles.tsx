@@ -65,8 +65,7 @@ function ParticleBrowser({ version }: { version: string }) {
         title="粒子"
         lead={
           <>
-            <span className="num">{all.length}</span> 个粒子 · 尺寸与生命周期取自 ParticleResources
-            注册表与各类源码
+            <span className="num">{all.length}</span> 种粒子，尺寸和寿命都按源码来的 · 深色底上看得最清
           </>
         }
       />
@@ -78,7 +77,7 @@ function ParticleBrowser({ version }: { version: string }) {
       {particles.error && <ErrorState title="加载失败" detail={particles.error.message} />}
       {particles.loading && <LoadingState label="正在加载粒子参数…" />}
       {!particles.loading && filtered.length === 0 && (
-        <EmptyState title={`没有匹配「${query}」的粒子`} hint="粒子名就是注册 id，例如 flame、smoke、crit。" />
+        <EmptyState title={`没找到「${query}」这个粒子`} hint="粒子名就是注册 id，试试 flame、smoke、crit。" />
       )}
 
       <AssetGrid gridRef={gridRef} padTop={padTop} padBottom={padBottom} minWidth={132} label="粒子列表">

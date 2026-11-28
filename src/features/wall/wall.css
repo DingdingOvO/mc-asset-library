@@ -1,0 +1,164 @@
+/*
+ * 背景墙页：左边参数、右边画布。面板沿用工作室那套控件样式，
+ * 这里只补本页特有的比例选择器、预设按钮和画布舞台。
+ */
+
+.wall {
+  display: grid;
+  grid-template-columns: 320px minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.wall__panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+}
+
+.wall__panel > * {
+  flex: 0 0 auto;
+}
+
+.wall__stage {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-4);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background:
+    repeating-conic-gradient(from 0deg, var(--surface-muted) 0deg 90deg, var(--surface) 90deg 180deg) 0 0 / 24px 24px;
+}
+
+/*
+ * @why 预览按实际像素渲染再整体缩放，不用 CSS 拉伸来"凑尺寸"。
+ *      拉伸会把 16px 的方块纹理插值成糊块，密度参数就看不出来了。
+ */
+.wall__canvas {
+  display: block;
+  /* @constraint 用 auto + 双 max：宽版铺满，竖版按高度收，不然 9:16 会顶出一屏 */
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: 74vh;
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  image-rendering: pixelated;
+}
+
+.wall__meta {
+  margin: 0;
+  color: var(--text-subtle);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+/* 比例选择：方块示意 + 名字 */
+.ratio-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.ratio {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  align-items: center;
+  padding: 6px 4px 5px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 10.5px;
+  cursor: pointer;
+  transition: border-color 120ms ease, background 120ms ease, color 120ms ease;
+}
+
+.ratio:hover {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.ratio[aria-pressed='true'] {
+  border-color: var(--accent-border);
+  background: var(--accent-muted);
+  color: var(--accent);
+}
+
+.ratio__box {
+  width: 26px;
+  max-height: 22px;
+  border: 1.5px solid currentcolor;
+  border-radius: 3px;
+  opacity: 0.75;
+}
+
+/* 预设风格 */
+.preset-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.preset {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: var(--text-xs);
+  cursor: pointer;
+  transition: border-color 120ms ease, color 120ms ease, background 120ms ease;
+}
+
+.preset:hover {
+  border-color: var(--accent-border);
+  color: var(--text);
+  background: var(--accent-muted);
+}
+
+/* 纹理多选：用小一号的 chip，一行能排下四五个 */
+.chips--tight .chip {
+  padding: 3px 9px;
+  font-size: var(--text-xs);
+}
+
+.wall__switches {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2) var(--space-4);
+}
+
+.wall__color {
+  width: 100%;
+  height: 30px;
+  padding: 2px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  background: var(--surface);
+  cursor: pointer;
+}
+
+@media (max-width: 1000px) {
+  .wall {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* @constraint 手机上先把图放前面：参数面板很长，滚半天才看到成果 */
+  .wall__stage {
+    order: -1;
+  }
+
+  .ratio-grid {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}

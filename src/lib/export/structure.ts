@@ -54,6 +54,14 @@ export interface StructureSubject {
   size: number
   /** 静帧底色，null 表示透明 */
   backdrop: string | null
+  /**
+   * 强制走 CPU 光栅化。
+   *
+   * @why 立体字的纯色/渐变材质把颜色写在顶点色里，底图是一张 1×1 的 data URL。
+   *      GPU 管线按「贴图 id」预热纹理，喂它一个 data URL 会当成素材路径去请求，
+   *      结果是白模。静帧导出必须和屏幕上看到的一致，所以这类主体直接走 CPU。
+   */
+  forceCpu?: boolean
 }
 
 /**
@@ -123,7 +131,8 @@ async function collectTextures(version: string, texes: Iterable<string>): Promis
   await Promise.all(
     list.map(async (tex) => {
       try {
-        const response = await fetch(textureSrc(version, tex))
+        // 内联贴图（data URL）直接 fetch，它是立体字纯色材质的 1×1 底图
+        const response = await fetch(tex.startsWith('data:') ? tex : textureSrc(version, tex))
         if (!response.ok) return
         pngs.set(tex, new Uint8Array(await response.arrayBuffer()))
       } catch {
@@ -239,7 +248,7 @@ export async function exportStructureStill(subject: StructureSubject): Promise<B
     unitsPerBlock: 1,
   }
 
-  if (hasWebGl()) {
+  if (hasWebGl() && !subject.forceCpu) {
     // @constraint 纹理必须先预热：管线渲染是同步的，贴图还在下载时会画成白模
     await modelPipeline().prepareTextures(
       [...new Set(subject.batches.map((batch) => batch.texture))],

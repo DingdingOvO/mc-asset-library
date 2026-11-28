@@ -49,8 +49,8 @@ function DataBrowser({ version }: { version: string }) {
         title="游戏数据"
         lead={
           <>
-            <span className="num">{groups.registry.length}</span> 个注册表 ·{' '}
-            <span className="num">{groups.asset.length}</span> 类资源文件
+            <span className="num">{groups.registry.length}</span> 个注册表、{' '}
+            <span className="num">{groups.asset.length}</span> 类资源文件 · 想扒原始 JSON 来这儿
           </>
         }
       />

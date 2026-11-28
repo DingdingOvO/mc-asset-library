@@ -138,8 +138,17 @@ export async function paintVoxelsCpu(
   const [px, py, pz] = camera.pivot
 
   // 贴图先全部取到手：画家算法要求逐三角形知道颜色，中途 await 会打乱顺序
+  /**
+   * @why 贴图不一定来自素材目录。立体字的纯色/渐变材质用一张 1×1 的
+   *      data URL 当底，颜色全在顶点色里；这里如果无脑套 `textureSrc`，
+   *      拼出来的地址是 `/mc/26.3/textures/data:image/png...png`，
+   *      取不到图 → 整块字退化成没有贴图的兜底色。
+   */
   const texels = await Promise.all(
-    batches.map((batch) => loadTexel(textureSrc(version, batch.texture)).catch(() => null)),
+    batches.map((batch) => {
+      const url = batch.texture.startsWith('data:') ? batch.texture : textureSrc(version, batch.texture)
+      return loadTexel(url).catch(() => null)
+    }),
   )
 
   const items: Sprite[] = []

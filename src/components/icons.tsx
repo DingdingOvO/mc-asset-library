@@ -170,3 +170,24 @@ export function ChevronIcon() {
     </svg>
   )
 }
+
+/** 立体字：一个带厚度的 A，示意挤出 */
+export function TextIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <path d="M4 15.2 8 5h2l4 10.2" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" />
+      <path d="M5.7 11.8h6.6" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+      <path d="M16.2 7.4v8" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" opacity=".55" />
+    </svg>
+  )
+}
+
+/** 背景墙：错缝砖块 */
+export function WallIcon() {
+  return (
+    <svg width="20" height="20" viewBox="0 0 20 20" fill="none" aria-hidden="true">
+      <rect x="3" y="3.6" width="14" height="12.8" rx="1.4" stroke="currentColor" strokeWidth="1.4" />
+      <path d="M3 7.9h14M3 12.1h14M7.6 3.6v4.3M12.4 7.9v4.2M7.6 12.1v4.3" stroke="currentColor" strokeWidth="1.3" />
+    </svg>
+  )
+}
